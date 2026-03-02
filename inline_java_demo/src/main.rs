@@ -66,6 +66,29 @@ fn main() {
 
 	// ── explicit javac + java flags (compile-time) ───────────────────────────
 	println!("explicit javac + java flags (ct_java!): {EXPLICIT_CT}");
+
+	// ── runtime int[] ────────────────────────────────────────────────────────
+	let nums: Vec<i32> = java! {
+		public static int[] run() {
+			return new int[]{10, 20, 30, 40, 50};
+		}
+	}.unwrap();
+	println!("int[] from Java: {nums:?}");
+
+	// ── runtime List<String> ─────────────────────────────────────────────────
+	let words: Vec<String> = java! {
+		import java.util.Arrays;
+		public static List<String> run() {
+			return Arrays.asList("alpha", "beta", "gamma");
+		}
+	}.unwrap();
+	println!("List<String> from Java: {words:?}");
+
+	// ── compile-time int array baked into binary ──────────────────────────────
+	println!("first 5 primes (ct_java): {PRIMES:?}");
+
+	// ── compile-time String array baked into binary ───────────────────────────
+	println!("days (ct_java): {DAYS:?}");
 }
 
 // ── compile-time with explicit javac and java flags ───────────────────────────
@@ -83,5 +106,19 @@ const EXPLICIT_CT: i32 = ct_java! {
 const PI_APPROX: f64 = ct_java! {
 	public static double run() {
 		return Math.PI;
+	}
+};
+
+// ── Compile-time int array ───────────────────────────────────────────────────
+const PRIMES: [i32; 5] = ct_java! {
+	public static int[] run() {
+		return new int[]{2, 3, 5, 7, 11};
+	}
+};
+
+// ── Compile-time String array ────────────────────────────────────────────────
+const DAYS: [&str; 3] = ct_java! {
+	public static String[] run() {
+		return new String[]{"Mon", "Tue", "Wed"};
 	}
 };

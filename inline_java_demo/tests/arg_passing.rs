@@ -95,3 +95,115 @@ const CT_JAVAC_SOURCEPATH: &str = ct_java! {
 fn ct_java_javac_sourcepath() {
 	assert_eq!(CT_JAVAC_SOURCEPATH, "Hello, World!");
 }
+
+// ── java! with int[] return type ─────────────────────────────────────────────
+
+#[test]
+fn java_runtime_int_array() {
+	let v: Vec<i32> = java! {
+		public static int[] run() {
+			return new int[]{1, 2, 3, 4, 5};
+		}
+	}.unwrap();
+	assert_eq!(v, vec![1i32, 2, 3, 4, 5]);
+}
+
+// ── java! with double[] return type ──────────────────────────────────────────
+
+#[test]
+fn java_runtime_double_array() {
+	let v: Vec<f64> = java! {
+		public static double[] run() {
+			return new double[]{1.5, 2.5, 3.5};
+		}
+	}.unwrap();
+	assert_eq!(v, vec![1.5f64, 2.5, 3.5]);
+}
+
+// ── java! with boolean[] return type ─────────────────────────────────────────
+
+#[test]
+fn java_runtime_boolean_array() {
+	let v: Vec<bool> = java! {
+		public static boolean[] run() {
+			return new boolean[]{true, false, true};
+		}
+	}.unwrap();
+	assert_eq!(v, vec![true, false, true]);
+}
+
+// ── java! with String[] return type ──────────────────────────────────────────
+
+#[test]
+fn java_runtime_string_array() {
+	let v: Vec<String> = java! {
+		public static String[] run() {
+			return new String[]{"hello", "world"};
+		}
+	}.unwrap();
+	assert_eq!(v, vec!["hello".to_string(), "world".to_string()]);
+}
+
+// ── java! with List<Integer> return type ─────────────────────────────────────
+
+#[test]
+fn java_runtime_list_integer() {
+	let v: Vec<i32> = java! {
+		import java.util.Arrays;
+		public static java.util.List<Integer> run() {
+			return Arrays.asList(10, 20, 30);
+		}
+	}.unwrap();
+	assert_eq!(v, vec![10i32, 20, 30]);
+}
+
+// ── java! with List<String> return type ──────────────────────────────────────
+
+#[test]
+fn java_runtime_list_string() {
+	let v: Vec<String> = java! {
+		import java.util.Arrays;
+		public static java.util.List<String> run() {
+			return Arrays.asList("foo", "bar", "baz");
+		}
+	}.unwrap();
+	assert_eq!(v, vec!["foo".to_string(), "bar".to_string(), "baz".to_string()]);
+}
+
+// ── java! with empty array ────────────────────────────────────────────────────
+
+#[test]
+fn java_runtime_empty_array() {
+	let v: Vec<i32> = java! {
+		public static int[] run() {
+			return new int[]{};
+		}
+	}.unwrap();
+	assert!(v.is_empty());
+}
+
+// ── ct_java! with int[] return type ──────────────────────────────────────────
+
+const CT_INT_ARRAY: [i32; 3] = ct_java! {
+	public static int[] run() {
+		return new int[]{100, 200, 300};
+	}
+};
+
+#[test]
+fn ct_java_int_array() {
+	assert_eq!(CT_INT_ARRAY, [100i32, 200, 300]);
+}
+
+// ── ct_java! with String[] return type ───────────────────────────────────────
+
+const CT_STRING_ARRAY: [&str; 2] = ct_java! {
+	public static String[] run() {
+		return new String[]{"compile", "time"};
+	}
+};
+
+#[test]
+fn ct_java_string_array() {
+	assert_eq!(CT_STRING_ARRAY, ["compile", "time"]);
+}
