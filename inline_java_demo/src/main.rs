@@ -35,7 +35,7 @@ fn main() {
 	println!("PI (baked at compile time): {PI_APPROX}");
 
 	let imports: String = java! {
-		javac = "-sourcepath \"$CARGO_MANIFEST_DIR\"",
+		javac = "-sourcepath $CARGO_MANIFEST_DIR",
 		import com.example.demo.*;
 
 		public static String run() {

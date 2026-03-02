@@ -90,7 +90,7 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 use proc_macro::TokenStream;
-use proc_macro2::{Ident, Spacing, TokenTree};
+use proc_macro2::{Ident, LineColumn, Spacing, TokenTree};
 use quote::quote;
 
 // ---------------------------------------------------------------------------
@@ -541,13 +541,145 @@ fn array_serialize_loop(s: ScalarType, iter_type: &str) -> String {
 	}
 }
 
-/// Scan the body token stream for the first `public static <type> run` pattern
-/// and return the corresponding `JavaType`.  Handles:
-///   - `public static T run`         → Scalar(T)
-///   - `public static T[] run`       → Array(T)
-///   - `public static List < T > run` → List(T)
-fn parse_run_return_type(body: &proc_macro2::TokenStream) -> Result<JavaType, String> {
-	let tts: Vec<TokenTree> = body.clone().into_iter().collect();
+// ---------------------------------------------------------------------------
+// parse_java_source — merged import split + var extraction + return-type parse
+// ---------------------------------------------------------------------------
+
+/// Output of the unified Java source parser.
+struct ParsedJava {
+	/// The import/package section verbatim from the original source.
+	imports: String,
+	/// The method body verbatim from the original source, with every `'var`
+	/// replaced by `_RUST_var`.
+	body: String,
+	/// Captured Rust variables: name → original Ident (for span / quoting).
+	vars: BTreeMap<String, Ident>,
+	/// Return type of the `public static T run()` method.
+	java_type: JavaType,
+}
+
+/// Records one `'var` occurrence found while walking the token tree.
+struct VarOccurrence {
+	/// Source position of the leading `'` punctuation.
+	quote_start: LineColumn,
+	/// Source position one-past-end of the identifier that follows.
+	ident_end: LineColumn,
+	/// Variable name (without the leading `'`).
+	name: String,
+}
+
+/// Walk `stream` recursively (into Groups) and collect every `'ident`
+/// occurrence.  The first occurrence of each name is stored in `vars`; all
+/// occurrences (for substitution) go into `occurrences`.
+fn collect_vars(
+	stream: proc_macro2::TokenStream,
+	vars: &mut BTreeMap<String, Ident>,
+	occurrences: &mut Vec<VarOccurrence>,
+) {
+	let tts: Vec<TokenTree> = stream.into_iter().collect();
+	let mut i = 0;
+	while i < tts.len() {
+		if matches!(&tts[i], TokenTree::Punct(p)
+				if p.as_char() == '\'' && p.spacing() == Spacing::Joint)
+			&& let Some(TokenTree::Ident(id)) = tts.get(i + 1)
+		{
+			let name = id.to_string();
+			vars.entry(name.clone()).or_insert_with(|| id.clone());
+			occurrences.push(VarOccurrence {
+				quote_start: tts[i].span().start(),
+				ident_end: id.span().end(),
+				name,
+			});
+			i += 2;
+			continue;
+		}
+		if let TokenTree::Group(g) = &tts[i] {
+			collect_vars(g.stream(), vars, occurrences);
+		}
+		i += 1;
+	}
+}
+
+/// Convert an absolute source `LineColumn` to a byte offset within `text`,
+/// given that the first character of `text` is at `text_start` in the source
+/// file.  Returns `text.len()` if `target` is at or past the end.
+///
+/// `LineColumn::line` is 1-indexed; `LineColumn::column` is 0-indexed (chars).
+fn offset_in_text(text: &str, text_start: LineColumn, target: LineColumn) -> usize {
+	let mut byte = 0usize;
+	let mut line = text_start.line;
+	let mut col = text_start.column;
+	for ch in text.chars() {
+		if line == target.line && col == target.column {
+			return byte;
+		}
+		byte += ch.len_utf8();
+		if ch == '\n' {
+			line += 1;
+			col = 0;
+		} else {
+			col += 1;
+		}
+	}
+	byte
+}
+
+/// Replace every `'var` occurrence in `body` with `_RUST_var` using the span
+/// positions in `occurrences`.  `body_start` is the absolute source position
+/// of the first character in `body`.
+fn substitute_vars_in_body(
+	body: &str,
+	body_start: LineColumn,
+	occurrences: &[VarOccurrence],
+) -> String {
+	let mut result = String::with_capacity(body.len() + occurrences.len() * 6);
+	let mut last_byte = 0usize;
+	for occ in occurrences {
+		let start = offset_in_text(body, body_start, occ.quote_start);
+		let end = offset_in_text(body, body_start, occ.ident_end);
+		result.push_str(&body[last_byte..start]);
+		result.push_str("_RUST_");
+		result.push_str(&occ.name);
+		last_byte = end;
+	}
+	result.push_str(&body[last_byte..]);
+	result
+}
+
+/// Fallback body reconstruction from tokens when `source_text()` is
+/// unavailable.  Performs `'var` → `_RUST_var` substitution at the token
+/// level.
+fn reconstruct_body_fallback(
+	tts: &[TokenTree],
+	start_idx: usize,
+	occurrences: &[VarOccurrence],
+) -> String {
+	// Index the quote positions so we can skip them during reconstruction.
+	let quote_positions: std::collections::HashSet<(usize, usize)> = occurrences
+		.iter()
+		.map(|o| (o.quote_start.line, o.quote_start.column))
+		.collect();
+
+	let mut parts: Vec<String> = Vec::new();
+	let mut i = start_idx;
+	while i < tts.len() {
+		let lc = tts[i].span().start();
+		if quote_positions.contains(&(lc.line, lc.column)) {
+			if let Some(TokenTree::Ident(id)) = tts.get(i + 1) {
+				parts.push(format!("_RUST_{id}"));
+				i += 2;
+				continue;
+			}
+		}
+		parts.push(tts[i].to_string());
+		i += 1;
+	}
+	parts.join(" ")
+}
+
+/// Scan `tts` for the first `public static <T> run` pattern and return the
+/// corresponding `JavaType`.
+fn parse_run_return_type(tts: &[TokenTree]) -> Result<JavaType, String> {
 	for i in 0..tts.len().saturating_sub(3) {
 		if !matches!(&tts[i], TokenTree::Ident(id) if id == "public") {
 			continue;
@@ -612,8 +744,133 @@ fn parse_run_return_type(body: &proc_macro2::TokenStream) -> Result<JavaType, St
 					});
 			}
 		}
+
+		// ── Pattern 4: public static java.util.List < BoxedT > run ──────────
+		if matches!(&tts[i + 2], TokenTree::Ident(id) if id == "java")
+			&& matches!(&tts.get(i + 3), Some(TokenTree::Punct(p)) if p.as_char() == '.')
+			&& matches!(&tts.get(i + 4), Some(TokenTree::Ident(id)) if id == "util")
+			&& matches!(&tts.get(i + 5), Some(TokenTree::Punct(p)) if p.as_char() == '.')
+			&& matches!(&tts.get(i + 6), Some(TokenTree::Ident(id)) if id == "List")
+			&& matches!(&tts.get(i + 7), Some(TokenTree::Punct(p)) if p.as_char() == '<')
+			&& let Some(TokenTree::Ident(inner_id)) = tts.get(i + 8)
+			&& matches!(&tts.get(i + 9), Some(TokenTree::Punct(p)) if p.as_char() == '>')
+			&& matches!(&tts.get(i + 10), Some(TokenTree::Ident(id)) if id == "run")
+		{
+			let inner_name = inner_id.to_string();
+			return ScalarType::from_boxed_name(&inner_name)
+				.map(JavaType::List)
+				.ok_or_else(|| {
+					format!(
+						"inline_java: `run()` List element type `{inner_name}` is not supported; \
+						 supported types: Byte Short Integer Long Float Double Boolean Character String"
+					)
+				});
+		}
 	}
 	Err("inline_java: could not find `public static <type> run()` in Java body".to_string())
+}
+
+/// Unified parser: walks the token stream once to separate `import`/`package`
+/// directives from the method body, identify the `run()` return type, and
+/// collect `'var` injections.
+///
+/// Rather than reconstructing strings from the token tree (which loses
+/// whitespace), it uses `Span::join` + `Span::source_text` to slice the
+/// original source text directly.
+fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, String> {
+	let tts: Vec<TokenTree> = stream.into_iter().collect();
+
+	// ── Separate imports from body ───────────────────────────────────────
+	let mut first_import_idx: Option<usize> = None;
+	let mut last_import_end_idx: Option<usize> = None; // index of the last ';' in imports
+	let mut first_body_idx: Option<usize> = None;
+	let mut in_imports = true;
+	let mut i = 0usize;
+
+	while i < tts.len() && in_imports {
+		match &tts[i] {
+			TokenTree::Ident(id) if id == "import" || id == "package" => {
+				first_import_idx.get_or_insert(i);
+				// Scan forward for the terminating ';'.
+				let semi = tts[i + 1..]
+					.iter()
+					.position(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == ';'))
+					.map(|rel| i + 1 + rel);
+				if let Some(semi_idx) = semi {
+					last_import_end_idx = Some(semi_idx);
+					i = semi_idx + 1;
+				} else {
+					// Malformed: no semicolon; treat remainder as body.
+					in_imports = false;
+					first_body_idx = Some(i);
+				}
+			}
+			_ => {
+				in_imports = false;
+				first_body_idx = Some(i);
+			}
+		}
+	}
+	// If the loop ended because all tokens were imports, body starts at i.
+	if first_body_idx.is_none() && i < tts.len() {
+		first_body_idx = Some(i);
+	}
+	let body_start = first_body_idx.unwrap_or(tts.len());
+
+	// ── Parse return type from body tokens ──────────────────────────────
+	let java_type = parse_run_return_type(&tts[body_start..])?;
+
+	// ── Collect vars from body (recursively into Groups) ────────────────
+	let mut vars: BTreeMap<String, Ident> = BTreeMap::new();
+	let mut occurrences: Vec<VarOccurrence> = Vec::new();
+	let body_stream: proc_macro2::TokenStream = tts[body_start..].iter().cloned().collect();
+	collect_vars(body_stream, &mut vars, &mut occurrences);
+	// Ensure occurrences are in source order for sequential substitution.
+	occurrences.sort_by_key(|o| (o.quote_start.line, o.quote_start.column));
+
+	// ── Extract text via source_text() ──────────────────────────────────
+
+	// imports: span from first import keyword to last ';'
+	let imports = match (first_import_idx, last_import_end_idx) {
+		(Some(fi), Some(le)) => tts[fi]
+			.span()
+			.join(tts[le].span())
+			.and_then(|s| s.source_text())
+			.unwrap_or_else(|| {
+				// Fallback: token-based reconstruction (loses some whitespace).
+				tts[fi..=le]
+					.iter()
+					.map(|tt| tt.to_string())
+					.collect::<Vec<_>>()
+					.join(" ")
+			}),
+		_ => String::new(),
+	};
+
+	// body: span from first body token to last token, then substitute vars.
+	let body = if body_start < tts.len() {
+		let start_span = tts[body_start].span();
+		let end_span = tts.last().unwrap().span();
+		let body_start_lc = start_span.start();
+
+		match start_span.join(end_span).and_then(|s| s.source_text()) {
+			Some(raw) if occurrences.is_empty() => raw,
+			Some(raw) => substitute_vars_in_body(&raw, body_start_lc, &occurrences),
+			None => {
+				// Fallback: token-based reconstruction with var substitution.
+				reconstruct_body_fallback(&tts, body_start, &occurrences)
+			}
+		}
+	} else {
+		String::new()
+	};
+
+	Ok(ParsedJava {
+		imports,
+		body,
+		vars,
+		java_type,
+	})
 }
 
 #[proc_macro]
@@ -623,19 +880,17 @@ pub fn java(input: TokenStream) -> TokenStream {
 	// Consume any leading `key = "value",` option pairs.
 	let (opts, input2) = extract_opts(input2);
 
-	// Replace 'var tokens with _RUST_var idents and collect the variable names.
-	let (substituted, vars) = extract_vars(input2);
-
-	// Split the substituted stream into import/package statements and the method body.
-	let (imports_ts, body_ts) = split_imports(substituted);
-	let imports = imports_ts.to_string();
-	let body = body_ts.to_string();
-
-	// Parse the return type of run() to drive serialisation/deserialisation.
-	let java_type = match parse_run_return_type(&body_ts) {
-		Ok(t) => t,
+	let parsed = match parse_java_source(input2) {
+		Ok(p) => p,
 		Err(msg) => return quote! { compile_error!(#msg) }.into(),
 	};
+
+	let ParsedJava {
+		imports,
+		body,
+		vars,
+		java_type,
+	} = parsed;
 
 	// Unique class name derived from the source content.
 	let mut h = DefaultHasher::new();
@@ -765,11 +1020,12 @@ pub fn ct_java(input: TokenStream) -> TokenStream {
 fn ct_java_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream, String> {
 	let (opts, input) = extract_opts(input);
 
-	let (imports_ts, body_ts) = split_imports(input);
-	let imports = imports_ts.to_string();
-	let body = body_ts.to_string();
-
-	let java_type = parse_run_return_type(&body_ts)?;
+	let ParsedJava {
+		imports,
+		body,
+		java_type,
+		..
+	} = parse_java_source(input)?;
 
 	let mut h = DefaultHasher::new();
 	imports.hash(&mut h);
@@ -977,92 +1233,4 @@ fn parse_package_name(imports: &str) -> Option<String> {
 	let semi = rest.find(';')?;
 	let pkg = rest[..semi].trim().replace(|c: char| c.is_whitespace(), "");
 	if pkg.is_empty() { None } else { Some(pkg) }
-}
-
-// ---------------------------------------------------------------------------
-// Variable extraction: replace `'var` with `_RUST_var`
-// ---------------------------------------------------------------------------
-
-/// Walk the token stream and replace every `'var` occurrence (a `'` Punct
-/// with `Joint` spacing immediately followed by an Ident) with a single Ident
-/// `_RUST_var`.  Recurse into groups.  Returns the substituted stream and a
-/// `BTreeMap` of variable names → their first-occurrence Ident (for spans).
-fn extract_vars(
-	input: proc_macro2::TokenStream,
-) -> (proc_macro2::TokenStream, BTreeMap<String, Ident>) {
-	let mut vars: BTreeMap<String, Ident> = BTreeMap::new();
-	let mut output: Vec<TokenTree> = Vec::new();
-	let mut iter = input.into_iter().peekable();
-
-	while let Some(tt) = iter.next() {
-		let is_quote_punct = matches!(
-			&tt,
-			TokenTree::Punct(p) if p.as_char() == '\'' && p.spacing() == Spacing::Joint
-		);
-
-		if is_quote_punct {
-			if matches!(iter.peek(), Some(TokenTree::Ident(_))) {
-				let TokenTree::Ident(ident) = iter.next().unwrap() else {
-					unreachable!()
-				};
-				let name = ident.to_string();
-				let span = ident.span();
-				vars.entry(name.clone()).or_insert_with(|| ident);
-				output.push(TokenTree::Ident(Ident::new(&format!("_RUST_{name}"), span)));
-			} else {
-				output.push(tt);
-			}
-		} else {
-			match tt {
-				TokenTree::Group(g) => {
-					let (inner, inner_vars) = extract_vars(g.stream());
-					for (k, v) in inner_vars {
-						vars.entry(k).or_insert(v);
-					}
-					let mut new_group = proc_macro2::Group::new(g.delimiter(), inner);
-					new_group.set_span(g.span());
-					output.push(TokenTree::Group(new_group));
-				}
-				other => output.push(other),
-			}
-		}
-	}
-
-	(output.into_iter().collect(), vars)
-}
-
-// ---------------------------------------------------------------------------
-// Token-level import / body split
-// ---------------------------------------------------------------------------
-
-/// Partition the token stream into (`import_statements`, rest).
-/// Detects `import …;` and `package …;` at the top level.
-fn split_imports(
-	input: proc_macro2::TokenStream,
-) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
-	let mut iter = input.into_iter();
-	let mut imports: Vec<TokenTree> = Vec::new();
-	let mut body: Vec<TokenTree> = Vec::new();
-
-	while let Some(tt) = iter.next() {
-		let is_directive = matches!(
-			&tt,
-			TokenTree::Ident(id) if *id == "import" || *id == "package"
-		);
-
-		if is_directive {
-			imports.push(tt);
-			for tt in iter.by_ref() {
-				let is_semi = matches!(&tt, TokenTree::Punct(p) if p.as_char() == ';');
-				imports.push(tt);
-				if is_semi {
-					break;
-				}
-			}
-		} else {
-			body.push(tt);
-		}
-	}
-
-	(imports.into_iter().collect(), body.into_iter().collect())
 }

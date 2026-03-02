@@ -150,7 +150,8 @@ fn java_runtime_string_array() {
 fn java_runtime_list_integer() {
 	let v: Vec<i32> = java! {
 		import java.util.Arrays;
-		public static java.util.List<Integer> run() {
+		import java.util.List;
+		public static List<Integer> run() {
 			return Arrays.asList(10, 20, 30);
 		}
 	}.unwrap();
