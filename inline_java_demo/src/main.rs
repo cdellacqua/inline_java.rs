@@ -72,8 +72,8 @@ fn main() {
 const EXPLICIT_CT: i32 = ct_java! {
 	javac = "-sourcepath /tmp",
 	java = "-Xss512k",
-	public static void run() {
-		System.out.println(1 + 1);
+	public static int run() {
+		return 1 + 1;
 	}
 };
 
@@ -81,7 +81,7 @@ const EXPLICIT_CT: i32 = ct_java! {
 // Math.PI is baked into the binary; java is never invoked at runtime for this.
 #[allow(clippy::approx_constant)]
 const PI_APPROX: f64 = ct_java! {
-	public static void run() {
-		System.out.println(Math.PI);
+	public static double run() {
+		return Math.PI;
 	}
 };

@@ -9,34 +9,31 @@
 // │ input       │ java!    │ ct_java!      │
 // └─────────────┴──────────┴───────────────┘
 //
+// Both macros share the same Java-side API: the user writes a
+// `public static <T> run()` method where T must be one of:
+//   byte, short, int, long, float, double, boolean, char, String
+//
+// The macro generates a `main()` that binary-serialises the return value of
+// `run()` to stdout (via DataOutputStream / raw UTF-8 for String), reads those
+// bytes, and produces the corresponding Rust value.  This avoids both text
+// parsing and the need to manually quote strings for ct_java!.
+//
 // Optional key-value options
 // ──────────────────────────
 // Both macros accept zero or more `key = "value"` pairs before the Java body,
 // separated by commas.  Recognised keys:
 //
 //   javac = "<args>"   extra command-line arguments passed verbatim to javac,
-//                      split on whitespace.  No default.
+//                      shell-quoted (single/double quotes respected).
 //   java  = "<args>"   extra command-line arguments passed verbatim to java,
-//                      split on whitespace.  No default.
-//
-// Examples:
-//
-//   java! {
-//       javac = "-sourcepath /path/to/java/src",
-//       import com.example.*; ...
-//   }
-//
-//   ct_java! {
-//       javac = "-sourcepath /path/to/src",
-//       java  = "-Dprop=val -Xss512k",
-//       public static void run() { ... }
-//   }
+//                      shell-quoted (single/double quotes respected).
 //
 // java!
 // ────────────
 // Runs Java at *program runtime*.  The user provides a `run()` method; the
 // macro wraps it in a class, compiles it with `javac`, and runs it with
-// `java`.
+// `java`.  The binary-encoded return value is decoded into the inferred Rust
+// type at the call site.
 //
 // Rust variables can be injected using `'var` syntax (same convention as
 // inline_python).  Each `'var` becomes the Java String `_RUST_var`, passed
@@ -53,12 +50,19 @@
 // ct_java!
 // ────────
 // Runs Java at *compile time* (inside the proc-macro, while rustc is
-// expanding macros).  Whatever the Java code prints to stdout becomes the
-// Rust token stream at the call site.
+// expanding macros).  The return value of `run()` is binary-deserialised and
+// spliced as a Rust literal at the call site (e.g. 42, 3.14, true, 'x',
+// "hello").
 //
 //   const PI_APPROX: f64 = ct_java! {
-//       public static void run() {
-//           System.out.println(Math.PI);
+//       public static double run() {
+//           return Math.PI;
+//       }
+//   };
+//
+//   const GREETING: &str = ct_java! {
+//       public static String run() {
+//           return "Hello, World!";
 //       }
 //   };
 
@@ -71,6 +75,199 @@ use std::str::FromStr;
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, Spacing, TokenTree};
 use quote::quote;
+
+// ---------------------------------------------------------------------------
+// JavaType — allowed return types for run(), with serialisation/deserialisation
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, PartialEq)]
+enum JavaType {
+	Byte,
+	Short,
+	Int,
+	Long,
+	Float,
+	Double,
+	Boolean,
+	Char,
+	JavaString,
+}
+
+impl JavaType {
+	fn from_name(s: &str) -> Option<Self> {
+		match s {
+			"byte" => Some(Self::Byte),
+			"short" => Some(Self::Short),
+			"int" => Some(Self::Int),
+			"long" => Some(Self::Long),
+			"float" => Some(Self::Float),
+			"double" => Some(Self::Double),
+			"boolean" => Some(Self::Boolean),
+			"char" => Some(Self::Char),
+			"String" => Some(Self::JavaString),
+			_ => None,
+		}
+	}
+
+	/// Generates the complete `main(String[] args)` method that binary-serialises
+	/// `run()`'s return value to stdout.  `var_inits` is pre-formatted code that
+	/// assigns `_RUST_*` static fields from `args[]` (empty for ct_java!).
+	fn java_main(self, var_inits: &str) -> String {
+		let serialize = match self {
+			Self::JavaString => {
+				"byte[] _b = run().getBytes(java.nio.charset.StandardCharsets.UTF_8);\n\
+				 \t\tSystem.out.write(_b);\n\
+				 \t\tSystem.out.flush();"
+					.to_string()
+			}
+			_ => {
+				let method = match self {
+					Self::Byte => "writeByte",
+					Self::Short => "writeShort",
+					Self::Int => "writeInt",
+					Self::Long => "writeLong",
+					Self::Float => "writeFloat",
+					Self::Double => "writeDouble",
+					Self::Boolean => "writeBoolean",
+					Self::Char => "writeChar",
+					Self::JavaString => unreachable!(),
+				};
+				format!(
+					"java.io.DataOutputStream _dos = \
+					 new java.io.DataOutputStream(System.out);\n\
+					 \t\t_dos.{method}(run());\n\
+					 \t\t_dos.flush();"
+				)
+			}
+		};
+		format!(
+			"\tpublic static void main(String[] args) throws Exception {{\n\
+			 {var_inits}\t\t{serialize}\n\
+			 \t}}"
+		)
+	}
+
+	/// Returns a Rust expression (as a token stream) that deserialises the raw
+	/// stdout bytes `_raw: Vec<u8>` into the corresponding Rust type.
+	/// Used by `java!` at program runtime.
+	fn rust_deser(self) -> proc_macro2::TokenStream {
+		match self {
+			Self::Byte => quote! { i8::from_be_bytes([_raw[0]]) },
+			Self::Short => quote! { i16::from_be_bytes([_raw[0], _raw[1]]) },
+			Self::Int => {
+				quote! { i32::from_be_bytes([_raw[0], _raw[1], _raw[2], _raw[3]]) }
+			}
+			Self::Long => {
+				quote! {
+					i64::from_be_bytes([
+						_raw[0], _raw[1], _raw[2], _raw[3],
+						_raw[4], _raw[5], _raw[6], _raw[7],
+					])
+				}
+			}
+			Self::Float => {
+				quote! { f32::from_be_bytes([_raw[0], _raw[1], _raw[2], _raw[3]]) }
+			}
+			Self::Double => {
+				quote! {
+					f64::from_be_bytes([
+						_raw[0], _raw[1], _raw[2], _raw[3],
+						_raw[4], _raw[5], _raw[6], _raw[7],
+					])
+				}
+			}
+			Self::Boolean => quote! { _raw[0] != 0 },
+			Self::Char => {
+				quote! {
+					::std::char::from_u32(u16::from_be_bytes([_raw[0], _raw[1]]) as u32)
+						.expect("inline_java: Java char is not a valid Unicode scalar value")
+				}
+			}
+			Self::JavaString => {
+				quote! {
+					::std::string::String::from_utf8(_raw)
+						.expect("inline_java: Java String is not valid UTF-8")
+				}
+			}
+		}
+	}
+
+	/// Converts the raw stdout bytes produced by the generated `main()` into a
+	/// Rust literal token stream to splice at the ct_java! call site.
+	fn ct_java_tokens(self, bytes: Vec<u8>) -> Result<proc_macro2::TokenStream, String> {
+		let lit = match self {
+			Self::Byte => format!("{}", i8::from_be_bytes([bytes[0]])),
+			Self::Short => format!("{}", i16::from_be_bytes([bytes[0], bytes[1]])),
+			Self::Int => {
+				let arr: [u8; 4] = bytes[..4]
+					.try_into()
+					.map_err(|_| "ct_java: truncated output for int")?;
+				format!("{}", i32::from_be_bytes(arr))
+			}
+			Self::Long => {
+				let arr: [u8; 8] = bytes[..8]
+					.try_into()
+					.map_err(|_| "ct_java: truncated output for long")?;
+				format!("{}", i64::from_be_bytes(arr))
+			}
+			// For floats use from_bits so all values (including NaN/±Infinity) round-trip
+			// correctly, and because f32::from_bits / f64::from_bits are const fn.
+			Self::Float => {
+				let arr: [u8; 4] = bytes[..4]
+					.try_into()
+					.map_err(|_| "ct_java: truncated output for float")?;
+				let bits = u32::from_be_bytes(arr);
+				format!("f32::from_bits(0x{bits:08x}_u32)")
+			}
+			Self::Double => {
+				let arr: [u8; 8] = bytes[..8]
+					.try_into()
+					.map_err(|_| "ct_java: truncated output for double")?;
+				let bits = u64::from_be_bytes(arr);
+				format!("f64::from_bits(0x{bits:016x}_u64)")
+			}
+			Self::Boolean => {
+				if bytes[0] != 0 { "true".to_string() } else { "false".to_string() }
+			}
+			Self::Char => {
+				let code_unit = u16::from_be_bytes([bytes[0], bytes[1]]);
+				let c = char::from_u32(code_unit as u32)
+					.ok_or("ct_java: Java char is not a valid Unicode scalar value")?;
+				format!("{c:?}") // Rust char literal: 'A', '\n', '\u{1f600}', …
+			}
+			Self::JavaString => {
+				let s = String::from_utf8(bytes)
+					.map_err(|_| "ct_java: Java String is not valid UTF-8".to_string())?;
+				format!("{s:?}") // Rust string literal: "hello", "line\none", …
+			}
+		};
+		proc_macro2::TokenStream::from_str(&lit)
+			.map_err(|e| format!("ct_java: produced invalid Rust token: {e}"))
+	}
+}
+
+/// Scan the body token stream for the first `public static <type> run` pattern
+/// and return the corresponding `JavaType`.  Emits a clear error for unsupported
+/// return types and if no `run()` method is found at all.
+fn parse_run_return_type(body: &proc_macro2::TokenStream) -> Result<JavaType, String> {
+	let tts: Vec<TokenTree> = body.clone().into_iter().collect();
+	for i in 0..tts.len().saturating_sub(3) {
+		if !matches!(&tts[i],   TokenTree::Ident(id) if id == "public") { continue; }
+		if !matches!(&tts[i+1], TokenTree::Ident(id) if id == "static") { continue; }
+		let type_name = match &tts[i + 2] {
+			TokenTree::Ident(id) => id.to_string(),
+			_ => continue,
+		};
+		if !matches!(&tts[i+3], TokenTree::Ident(id) if id == "run") { continue; }
+		return JavaType::from_name(&type_name).ok_or_else(|| {
+			format!(
+				"inline_java: `run()` return type `{type_name}` is not supported; \
+				 allowed: byte, short, int, long, float, double, boolean, char, String"
+			)
+		});
+	}
+	Err("inline_java: could not find `public static <type> run()` in Java body".to_string())
+}
 
 #[proc_macro]
 pub fn java(input: TokenStream) -> TokenStream {
@@ -86,6 +283,12 @@ pub fn java(input: TokenStream) -> TokenStream {
 	let (imports_ts, body_ts) = split_imports(substituted);
 	let imports = imports_ts.to_string();
 	let body = body_ts.to_string();
+
+	// Parse the return type of run() to drive serialisation/deserialisation.
+	let java_type = match parse_run_return_type(&body_ts) {
+		Ok(t) => t,
+		Err(msg) => return quote! { compile_error!(#msg) }.into(),
+	};
 
 	// Unique class name derived from the source content.
 	let mut h = DefaultHasher::new();
@@ -117,26 +320,18 @@ pub fn java(input: TokenStream) -> TokenStream {
 			s
 		});
 
-	// Assemble the complete Java source file.
+	let main_method = java_type.java_main(&var_inits);
 	let java_class = format!(
-		"{imports}\npublic class {class_name} {{\n{var_fields}\n{body}\n\n\
-         public static void main(String[] args) {{\n\
-         {var_inits}\
-         \t\tSystem.out.println(run());\n\
-         }}\n}}\n"
+		"{imports}\npublic class {class_name} {{\n{var_fields}\n{body}\n\n{main_method}\n}}\n"
 	);
 
-	let java_compiler_extra: Vec<String> = opts
-		.javac_args
-		.map(|a| split_args(&a))
-		.unwrap_or_default();
-	let java_runtime_extra: Vec<String> = opts
-		.java_args
-		.map(|a| split_args(&a))
-		.unwrap_or_default();
+	let java_compiler_extra: Vec<String> =
+		opts.javac_args.map(|a| split_args(&a)).unwrap_or_default();
+	let java_runtime_extra: Vec<String> =
+		opts.java_args.map(|a| split_args(&a)).unwrap_or_default();
 
-	// Idents for the captured Rust variables, in sorted order.
 	let var_idents: Vec<Ident> = vars.values().cloned().collect();
+	let deser = java_type.rust_deser();
 
 	let generated = quote! {
 		{
@@ -178,10 +373,8 @@ pub fn java(input: TokenStream) -> TokenStream {
 				);
 			}
 
-			let _out = ::std::string::String::from_utf8(_java.stdout)
-				.expect("inline_java: Java output was not valid UTF-8");
-			// T is inferred from the binding at the call site, e.g. `let x: i32 = …`
-			_out.trim().parse().expect("inline_java: could not parse Java output")
+			let _raw = _java.stdout;
+			#deser
 		}
 	};
 
@@ -192,10 +385,12 @@ pub fn java(input: TokenStream) -> TokenStream {
 // ct_java! — compile-time Java evaluation
 // ---------------------------------------------------------------------------
 
-/// Run Java at *compile time* and splice its stdout into the Rust token stream.
+/// Run Java at *compile time* and splice its return value as a Rust literal.
 ///
 /// Accepts optional `javac = "..."` and `java = "..."` key-value pairs before
-/// the Java body.  Both default to no extra args when omitted.
+/// the Java body.  The user provides a `public static <T> run()` method; its
+/// binary-serialised return value is decoded and emitted as a Rust literal at
+/// the call site (`42`, `3.14`, `true`, `'x'`, `"hello"`, …).
 ///
 /// Java compilation/runtime errors become Rust `compile_error!` diagnostics.
 #[proc_macro]
@@ -213,6 +408,8 @@ fn ct_java_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStr
 	let imports = imports_ts.to_string();
 	let body = body_ts.to_string();
 
+	let java_type = parse_run_return_type(&body_ts)?;
+
 	let mut h = DefaultHasher::new();
 	imports.hash(&mut h);
 	body.hash(&mut h);
@@ -225,12 +422,9 @@ fn ct_java_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStr
 		None => class_name.clone(),
 	};
 
-	// The user writes a `run()` method; main just calls it.
+	let main_method = java_type.java_main("");
 	let java_class = format!(
-		"{imports}\npublic class {class_name} {{\n{body}\n\n\
-         public static void main(String[] args) {{\n\
-         \t\trun();\n\
-         }}\n}}\n"
+		"{imports}\npublic class {class_name} {{\n{body}\n\n{main_method}\n}}\n"
 	);
 
 	let tmp_dir = std::env::temp_dir().join(&class_name);
@@ -241,30 +435,27 @@ fn ct_java_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStr
 	std::fs::write(&src, &java_class)
 		.map_err(|e| format!("ct_java: failed to write .java source: {e}"))?;
 
-	let java_compiler_extra: Vec<String> = opts
-		.javac_args
-		.map(|a| split_args(&a))
-		.unwrap_or_default();
-	let java_runtime_extra: Vec<String> = opts
-		.java_args
-		.map(|a| split_args(&a))
-		.unwrap_or_default();
+	let java_compiler_extra: Vec<String> =
+		opts.javac_args.map(|a| split_args(&a)).unwrap_or_default();
+	let java_runtime_extra: Vec<String> =
+		opts.java_args.map(|a| split_args(&a)).unwrap_or_default();
 
 	// Compile phase.
-	let mut java_compiler_cmd = std::process::Command::new("javac");
+	let mut javac_cmd = std::process::Command::new("javac");
 	for arg in &java_compiler_extra {
-		java_compiler_cmd.arg(arg);
+		javac_cmd.arg(arg);
 	}
-	let javac_out = java_compiler_cmd
+	let javac_out = javac_cmd
 		.arg("-d")
 		.arg(&tmp_dir)
 		.arg(&src)
 		.output()
 		.map_err(|e| format!("ct_java: could not invoke javac (is it on PATH?): {e}"))?;
-
 	if !javac_out.status.success() {
-		let stderr = String::from_utf8_lossy(&javac_out.stderr);
-		return Err(format!("ct_java: javac failed:\n{stderr}"));
+		return Err(format!(
+			"ct_java: javac failed:\n{}",
+			String::from_utf8_lossy(&javac_out.stderr)
+		));
 	}
 
 	// Run phase.
@@ -272,23 +463,20 @@ fn ct_java_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStr
 	for arg in &java_runtime_extra {
 		java_cmd.arg(arg);
 	}
-	let java_output = java_cmd
+	let java_out = java_cmd
 		.arg("-cp")
 		.arg(&tmp_dir)
 		.arg(&full_class_name)
 		.output()
 		.map_err(|e| format!("ct_java: could not invoke java (is it on PATH?): {e}"))?;
-
-	if !java_output.status.success() {
-		let stderr = String::from_utf8_lossy(&java_output.stderr);
-		return Err(format!("ct_java: java failed:\n{stderr}"));
+	if !java_out.status.success() {
+		return Err(format!(
+			"ct_java: java failed:\n{}",
+			String::from_utf8_lossy(&java_out.stderr)
+		));
 	}
 
-	let stdout = String::from_utf8(java_output.stdout)
-		.map_err(|_| "ct_java: Java output was not valid UTF-8".to_string())?;
-
-	proc_macro2::TokenStream::from_str(stdout.trim())
-		.map_err(|e| format!("ct_java: produced invalid Rust code: {e}"))
+	java_type.ct_java_tokens(java_out.stdout)
 }
 
 // ---------------------------------------------------------------------------
@@ -296,9 +484,9 @@ fn ct_java_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStr
 // ---------------------------------------------------------------------------
 
 struct JavaOpts {
-	/// Extra args for `javac`, split on whitespace at use-site.  `None` → no extra args.
+	/// Extra args for `javac`, shell-split at use-site.  `None` → no extra args.
 	javac_args: Option<String>,
-	/// Extra args for `java`, split on whitespace at use-site.  `None` → no extra args.
+	/// Extra args for `java`, shell-split at use-site.  `None` → no extra args.
 	java_args: Option<String>,
 }
 
@@ -339,24 +527,19 @@ fn split_args(s: &str) -> Vec<String> {
 /// body.  Unrecognised leading tokens are left untouched.
 fn extract_opts(input: proc_macro2::TokenStream) -> (JavaOpts, proc_macro2::TokenStream) {
 	let mut tts: Vec<TokenTree> = input.into_iter().collect();
-	let mut opts = JavaOpts {
-		javac_args: None,
-		java_args: None,
-	};
+	let mut opts = JavaOpts { javac_args: None, java_args: None };
 	let mut cursor = 0;
 
 	loop {
-		// We need at least Ident `=` Literal at positions cursor..cursor+2.
 		match try_parse_opt(&tts[cursor..]) {
 			None => break,
 			Some((key, val, consumed)) => {
 				match key.as_str() {
 					"javac" => opts.javac_args = Some(val),
 					"java" => opts.java_args = Some(val),
-					_ => break, // unrecognised key — stop, leave in stream
+					_ => break,
 				}
 				cursor += consumed;
-				// Consume optional trailing comma.
 				if let Some(TokenTree::Punct(p)) = tts.get(cursor)
 					&& p.as_char() == ','
 				{
@@ -388,7 +571,6 @@ fn try_parse_opt(tts: &[TokenTree]) -> Option<(String, String, usize)> {
 		Some(TokenTree::Literal(lit)) => lit.to_string(),
 		_ => return None,
 	};
-	// Strip surrounding double-quotes from the string literal representation.
 	if val_str.starts_with('"') && val_str.ends_with('"') && val_str.len() >= 2 {
 		Some((key, val_str[1..val_str.len() - 1].to_string(), 3))
 	} else {

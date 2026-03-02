@@ -68,13 +68,11 @@ fn java_runtime_javac_and_java_args() {
 }
 
 // ── ct_java! with java = "..." ────────────────────────────────────────────────
-// Java must print a valid Rust expression; wrap the string in quotes so the
-// output is a Rust string literal that ct_java! can splice into the token stream.
 
 const CT_JAVA_ARG: &str = ct_java! {
 	java = "-Dinline.ct=compile-time",
-	public static void run() {
-		System.out.println("\"" + System.getProperty("inline.ct") + "\"");
+	public static String run() {
+		return System.getProperty("inline.ct");
 	}
 };
 
@@ -88,8 +86,8 @@ fn ct_java_java_arg() {
 const CT_JAVAC_SOURCEPATH: &str = ct_java! {
 	javac = "-sourcepath /home/ubuntu/Dev/inline_java/inline_java_demo",
 	import com.example.demo.*;
-	public static void run() {
-		System.out.println("\"" + new HelloWorld().greet() + "\"");
+	public static String run() {
+		return new HelloWorld().greet();
 	}
 };
 
