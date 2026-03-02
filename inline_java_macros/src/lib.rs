@@ -937,67 +937,77 @@ pub fn java(input: TokenStream) -> TokenStream {
 		"{imports}\n{outer}\npublic class {class_name} {{\n{var_fields}\n{body}\n\n{main_method}\n}}\n"
 	);
 
-	// $INLINE_JAVA_CP is injected as a virtual variable during shellexpand so
-	// users can reference the auto-generated tmpdir in their javac/java args
-	// (e.g. `java = "-cp $INLINE_JAVA_CP:mylib.jar"`).  The path is
-	// deterministic (temp_dir + class_name hash) and matches the path the
-	// generated code computes at program runtime.
-	let inline_java_cp = std::env::temp_dir()
-		.join(&class_name)
-		.to_string_lossy()
-		.into_owned();
-
-	let java_compiler_extra: Vec<String> = opts
-		.javac_args
-		.map(|a| split_args(&shellexpand_with_cp(&a, &inline_java_cp)))
-		.unwrap_or_default();
-	let java_runtime_extra: Vec<String> = opts
-		.java_args
-		.map(|a| split_args(&shellexpand_with_cp(&a, &inline_java_cp)))
-		.unwrap_or_default();
+	// Raw option strings — shellexpand runs at runtime so that $INLINE_JAVA_CP
+	// resolves to the actual (PID-qualified) temp dir.
+	let javac_raw = opts.javac_args.unwrap_or_default();
+	let java_raw = opts.java_args.unwrap_or_default();
 	let var_idents: Vec<Ident> = vars.values().cloned().collect();
 	let deser = java_type.rust_deser();
 
 	let generated = quote! {
 		(|| -> ::std::result::Result<_, ::inline_java::JavaError> {
-			// Deterministic temp dir keyed by the class name (= hash of source).
-			let _tmp_dir = ::std::env::temp_dir().join(#class_name);
-			::std::fs::create_dir_all(&_tmp_dir)
-				.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
+			// Temp dir: source-hash subdir + PID subdir.
+			// Same process → same dir (mutex below serialises write+compile).
+			// Different processes → different dirs (no cross-process races).
+			let _tmp_dir = ::std::env::temp_dir()
+				.join(#class_name)
+				.join(::std::process::id().to_string());
+			let _cp = _tmp_dir.to_string_lossy().into_owned();
 
-			let _src = _tmp_dir.join(#filename);
-			::std::fs::write(&_src, #java_class)
-				.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
+			// Expand $INLINE_JAVA_CP and other shell variables at runtime.
+			let _javac_extra = ::inline_java::expand_java_args(#javac_raw, &_cp);
+			let _java_extra  = ::inline_java::expand_java_args(#java_raw,  &_cp);
 
-			// Compile phase.
-			let _javac = ::std::process::Command::new("javac")
-				#(.arg(#java_compiler_extra))*
-				.arg("-d").arg(&_tmp_dir)
-				.arg(&_src)
-				.output()
-				.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
-			if !_javac.status.success() {
-				return Err(::inline_java::JavaError::CompilationFailed(
-					::std::string::String::from_utf8_lossy(&_javac.stderr).into_owned()
-				));
+			// Serialise write+compile: only one thread per call site compiles.
+			// A poisoned mutex is recovered so a later thread can retry after
+			// an earlier one panicked mid-compile.
+			static _COMPILED: ::std::sync::Mutex<bool> =
+				::std::sync::Mutex::new(false);
+			{
+				let mut _guard = _COMPILED.lock()
+					.unwrap_or_else(|e| e.into_inner());
+				if !*_guard {
+					::std::fs::create_dir_all(&_tmp_dir)
+						.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
+
+					let _src = _tmp_dir.join(#filename);
+					::std::fs::write(&_src, #java_class)
+						.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
+
+					// Compile phase.
+					let mut _javac_cmd = ::std::process::Command::new("javac");
+					for _arg in &_javac_extra { _javac_cmd.arg(_arg); }
+					let _javac_out = _javac_cmd
+						.arg("-d").arg(&_tmp_dir)
+						.arg(&_src)
+						.output()
+						.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
+					if !_javac_out.status.success() {
+						return Err(::inline_java::JavaError::CompilationFailed(
+							::std::string::String::from_utf8_lossy(&_javac_out.stderr).into_owned()
+						));
+					}
+					*_guard = true;
+				}
 			}
 
 			// Run phase.  The default `-cp $tmpdir` comes first; any `-cp`
 			// supplied via `java = "..."` will override it (last flag wins).
-			let _java = ::std::process::Command::new("java")
-				.arg("-cp").arg(&_tmp_dir)
-				#(.arg(#java_runtime_extra))*
+			let mut _java_cmd = ::std::process::Command::new("java");
+			_java_cmd.arg("-cp").arg(&_tmp_dir);
+			for _arg in &_java_extra { _java_cmd.arg(_arg); }
+			let _java_out = _java_cmd
 				.arg(#full_class_name)
 				#(.arg(::std::string::ToString::to_string(&#var_idents)))*
 				.output()
 				.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
-			if !_java.status.success() {
+			if !_java_out.status.success() {
 				return Err(::inline_java::JavaError::RuntimeFailed(
-					::std::string::String::from_utf8_lossy(&_java.stderr).into_owned()
+					::std::string::String::from_utf8_lossy(&_java_out.stderr).into_owned()
 				));
 			}
 
-			let _raw = _java.stdout;
+			let _raw = _java_out.stdout;
 			::std::result::Result::Ok(#deser)
 		})()
 	};

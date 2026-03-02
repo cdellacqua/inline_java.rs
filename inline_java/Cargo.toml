@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 inline_java_macros = { version = "0.1.0", path = "../inline_java_macros" }
 thiserror = "2.0.18"
+shellexpand = "3.1.2"
