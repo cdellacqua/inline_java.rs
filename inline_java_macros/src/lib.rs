@@ -27,7 +27,6 @@
 //     - String: 4-byte int32 length + UTF-8 bytes
 //
 // Optional key-value options
-// ──────────────────────────
 // Both macros accept zero or more `key = "value"` pairs before the Java body,
 // separated by commas.  Recognised keys:
 //
@@ -37,7 +36,6 @@
 //                      shell-quoted (single/double quotes respected).
 //
 // java!
-// ────────────
 // Runs Java at *program runtime*.  The user provides a `run()` method; the
 // macro wraps it in a class, compiles it with `javac`, and runs it with
 // `java`.  The binary-encoded return value is decoded into the inferred Rust
@@ -59,7 +57,6 @@
 //   }.unwrap();
 //
 // ct_java!
-// ────────
 // Runs Java at *compile time* (inside the proc-macro, while rustc is
 // expanding macros).  The return value of `run()` is binary-deserialised and
 // spliced as a Rust literal at the call site (e.g. 42, 3.14, true, 'x',
@@ -83,18 +80,16 @@
 //       }
 //   };
 
+use proc_macro::TokenStream;
+use proc_macro2::{Ident, LineColumn, Spacing, TokenTree};
+use quote::quote;
 use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
 use std::fmt::Write as FmtWrite;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
-use proc_macro::TokenStream;
-use proc_macro2::{Ident, LineColumn, Spacing, TokenTree};
-use quote::quote;
 
-// ---------------------------------------------------------------------------
 // ScalarType — the nine primitive / String base types
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq)]
 enum ScalarType {
@@ -258,9 +253,7 @@ impl ScalarType {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // JavaType — allowed return types for run(), with serialisation/deserialisation
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq)]
 enum JavaType {
@@ -433,9 +426,7 @@ impl JavaType {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // scalar_ct_lit — convert raw bytes to a Rust literal string for one element
-// ---------------------------------------------------------------------------
 
 /// Deserialise one element of type `s` from `bytes` and return a
 /// `(rust_literal_string, bytes_consumed)` pair for use in `ct_java_tokens`.
@@ -519,9 +510,7 @@ fn scalar_ct_lit(s: ScalarType, bytes: &[u8]) -> Result<(String, usize), String>
 	}
 }
 
-// ---------------------------------------------------------------------------
 // array_serialize_loop — Java loop body for array/List serialisation
-// ---------------------------------------------------------------------------
 
 /// Returns the Java `for` loop that serialises the elements of `_arr` using
 /// `_dos`.  `iter_type` is the element type used in the `for` declaration
@@ -540,9 +529,7 @@ fn array_serialize_loop(s: ScalarType, iter_type: &str) -> String {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // parse_java_source — merged import split + var extraction + return-type parse
-// ---------------------------------------------------------------------------
 
 /// Output of the unified Java source parser.
 struct ParsedJava {
@@ -667,12 +654,12 @@ fn reconstruct_body_fallback(
 	let mut i = start_idx;
 	while i < tts.len() {
 		let lc = tts[i].span().start();
-		if quote_positions.contains(&(lc.line, lc.column)) {
-			if let Some(TokenTree::Ident(id)) = tts.get(i + 1) {
-				parts.push(format!("_RUST_{id}"));
-				i += 2;
-				continue;
-			}
+		if quote_positions.contains(&(lc.line, lc.column))
+			&& let Some(TokenTree::Ident(id)) = tts.get(i + 1)
+		{
+			parts.push(format!("_RUST_{id}"));
+			i += 2;
+			continue;
 		}
 		parts.push(tts[i].to_string());
 		i += 1;
@@ -692,7 +679,7 @@ fn parse_run_return_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String>
 			continue;
 		}
 
-		// ── Pattern 1: public static T run  (scalar) ───────────────────────
+		// Pattern 1: public static T run  (scalar)
 		if let TokenTree::Ident(type_id) = &tts[i + 2] {
 			let type_name = type_id.to_string();
 
@@ -708,7 +695,7 @@ fn parse_run_return_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String>
 					});
 			}
 
-			// ── Pattern 2: public static T[] run  (array) ──────────────────
+			// Pattern 2: public static T[] run  (array)
 			let is_empty_bracket = matches!(
 				&tts.get(i + 3),
 				Some(TokenTree::Group(g))
@@ -729,7 +716,7 @@ fn parse_run_return_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String>
 			}
 		}
 
-		// ── Pattern 3: public static List < BoxedT > run  (List<T>) ────────
+		// Pattern 3: public static List < BoxedT > run  (List<T>)
 		if matches!(&tts[i + 2], TokenTree::Ident(id) if id == "List")
 			&& matches!(&tts.get(i + 3), Some(TokenTree::Punct(p)) if p.as_char() == '<')
 			&& let Some(TokenTree::Ident(inner_id)) = tts.get(i + 4)
@@ -749,7 +736,7 @@ fn parse_run_return_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String>
 			}
 		}
 
-		// ── Pattern 4: public static java.util.List < BoxedT > run ──────────
+		// Pattern 4: public static java.util.List < BoxedT > run
 		if matches!(&tts[i + 2], TokenTree::Ident(id) if id == "java")
 			&& matches!(&tts.get(i + 3), Some(TokenTree::Punct(p)) if p.as_char() == '.')
 			&& matches!(&tts.get(i + 4), Some(TokenTree::Ident(id)) if id == "util")
@@ -784,7 +771,7 @@ fn parse_run_return_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String>
 fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, String> {
 	let tts: Vec<TokenTree> = stream.into_iter().collect();
 
-	// ── Separate imports from body ───────────────────────────────────────
+	// Separate imports from body
 	let mut first_import_idx: Option<usize> = None;
 	let mut last_import_end_idx: Option<usize> = None; // index of the last ';' in imports
 	let mut first_body_idx: Option<usize> = None;
@@ -821,13 +808,13 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 	}
 	let body_start = first_body_idx.unwrap_or(tts.len());
 
-	// ── Parse return type from body tokens ──────────────────────────────
+	// Parse return type from body tokens
 	// Also returns the index (relative to body_start) of the `public` token
 	// so we can split outer class declarations from the run() method.
 	let (java_type, run_rel_idx) = parse_run_return_type(&tts[body_start..])?;
 	let run_abs_idx = body_start + run_rel_idx;
 
-	// ── Collect vars from body (recursively into Groups) ────────────────
+	// Collect vars from body (recursively into Groups)
 	let mut vars: BTreeMap<String, Ident> = BTreeMap::new();
 	let mut occurrences: Vec<VarOccurrence> = Vec::new();
 	let body_stream: proc_macro2::TokenStream = tts[body_start..].iter().cloned().collect();
@@ -835,7 +822,7 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 	// Ensure occurrences are in source order for sequential substitution.
 	occurrences.sort_by_key(|o| (o.quote_start.line, o.quote_start.column));
 
-	// ── Extract text via source_text() ──────────────────────────────────
+	// Extract text via source_text()
 
 	// Helper: get source text for a contiguous slice of tts, with fallback.
 	let slice_text = |lo: usize, hi: usize| -> String {
@@ -849,7 +836,7 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 			.unwrap_or_else(|| {
 				tts[lo..hi]
 					.iter()
-					.map(|tt| tt.to_string())
+					.map(std::string::ToString::to_string)
 					.collect::<Vec<_>>()
 					.join(" ")
 			})
@@ -872,8 +859,7 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 
 		// occurrences is sorted; skip any that fall in the outer section.
 		let first_in_body = occurrences.partition_point(|o| {
-			(o.quote_start.line, o.quote_start.column)
-				< (body_start_lc.line, body_start_lc.column)
+			(o.quote_start.line, o.quote_start.column) < (body_start_lc.line, body_start_lc.column)
 		});
 		let body_occurrences = &occurrences[first_in_body..];
 
@@ -956,7 +942,10 @@ pub fn java(input: TokenStream) -> TokenStream {
 	// (e.g. `java = "-cp $INLINE_JAVA_CP:mylib.jar"`).  The path is
 	// deterministic (temp_dir + class_name hash) and matches the path the
 	// generated code computes at program runtime.
-	let inline_java_cp = std::env::temp_dir().join(&class_name).to_string_lossy().into_owned();
+	let inline_java_cp = std::env::temp_dir()
+		.join(&class_name)
+		.to_string_lossy()
+		.into_owned();
 
 	let java_compiler_extra: Vec<String> = opts
 		.javac_args
@@ -1016,9 +1005,7 @@ pub fn java(input: TokenStream) -> TokenStream {
 	generated.into()
 }
 
-// ---------------------------------------------------------------------------
 // ct_java! — compile-time Java evaluation
-// ---------------------------------------------------------------------------
 
 /// Run Java at *compile time* and splice its return value as a Rust literal.
 ///
@@ -1122,9 +1109,7 @@ fn ct_java_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStr
 	java_type.ct_java_tokens(java_output.stdout)
 }
 
-// ---------------------------------------------------------------------------
 // Option extraction: `javac = "…"` / `java = "…"` before the Java body
-// ---------------------------------------------------------------------------
 
 struct JavaOpts {
 	/// Extra args for `javac`, shell-split at use-site.  `None` → no extra args.
@@ -1231,17 +1216,14 @@ fn try_parse_opt(tts: &[TokenTree]) -> Option<(String, String, usize)> {
 	if eq.as_char() != '=' {
 		return None;
 	}
-	let lit = match tts.get(2) {
-		Some(TokenTree::Literal(lit)) => lit,
-		_ => return None,
+	let Some(TokenTree::Literal(lit)) = tts.get(2) else {
+		return None;
 	};
 	let value = litrs::StringLit::try_from(lit).ok()?.value().to_owned();
 	Some((key, value, 3))
 }
 
-// ---------------------------------------------------------------------------
 // Package name extraction
-// ---------------------------------------------------------------------------
 
 /// Extract the package name from the string representation of the imports
 /// token stream.  `proc_macro2` serialises `package com.example.demo;` as a

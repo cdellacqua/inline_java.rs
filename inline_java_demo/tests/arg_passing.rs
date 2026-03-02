@@ -1,6 +1,6 @@
 use inline_java::{ct_java, java};
 
-// ── java = "..." : single system property passed to the JVM ──────────────────
+// java = "..." : single system property passed to the JVM
 
 #[test]
 fn java_runtime_single_java_arg() {
@@ -25,7 +25,7 @@ fn java_runtime_single_java_arg_with_spaces() {
 	assert_eq!(val, Ok("hello world".to_string()));
 }
 
-// ── java = "..." : multiple args are split on whitespace ─────────────────────
+// java = "..." : multiple args are split on whitespace
 
 #[test]
 fn java_runtime_multiple_java_args() {
@@ -38,7 +38,7 @@ fn java_runtime_multiple_java_args() {
 	assert_eq!(val, Ok("foo:bar".to_string()));
 }
 
-// ── classpath JAR via $INLINE_JAVA_CP ────────────────────────────────────────
+// classpath JAR via $INLINE_JAVA_CP
 
 #[test]
 fn java_runtime_javac_classpath_jar() {
@@ -66,7 +66,7 @@ fn java_runtime_javac_classpath_jar_long_arg_name() {
 	assert_eq!(val, Ok("Hello, World!".to_string()));
 }
 
-// ── javac = "..." : sourcepath lets javac resolve project Java files ──────────
+// javac = "..." : sourcepath lets javac resolve project Java files
 
 #[test]
 fn java_runtime_javac_sourcepath() {
@@ -80,7 +80,7 @@ fn java_runtime_javac_sourcepath() {
 	assert_eq!(val, Ok("Hello, World!".to_string()));
 }
 
-// ── both opts together ────────────────────────────────────────────────────────
+// both opts together
 
 #[test]
 fn java_runtime_javac_and_java_args() {
@@ -95,7 +95,7 @@ fn java_runtime_javac_and_java_args() {
 	assert_eq!(val, Ok("Hello, World!|yes".to_string()));
 }
 
-// ── ct_java! with java = "..." ────────────────────────────────────────────────
+// ct_java! with java = "..."
 
 const CT_JAVA_ARG: &str = ct_java! {
 	java = "-Dinline.ct=compile-time",
@@ -109,7 +109,7 @@ fn ct_java_java_arg() {
 	assert_eq!(CT_JAVA_ARG, "compile-time");
 }
 
-// ── ct_java! with javac = "..." ───────────────────────────────────────────────
+// ct_java! with javac = "..."
 
 const CT_JAVAC_SOURCEPATH: &str = ct_java! {
 	javac = "-sourcepath $CARGO_MANIFEST_DIR",
@@ -124,7 +124,7 @@ fn ct_java_javac_sourcepath() {
 	assert_eq!(CT_JAVAC_SOURCEPATH, "Hello, World!");
 }
 
-// ── java! with int[] return type ─────────────────────────────────────────────
+// java! with int[] return type
 
 #[test]
 fn java_runtime_int_array() {
@@ -136,7 +136,7 @@ fn java_runtime_int_array() {
 	assert_eq!(v, vec![1i32, 2, 3, 4, 5]);
 }
 
-// ── java! with double[] return type ──────────────────────────────────────────
+// java! with double[] return type
 
 #[test]
 fn java_runtime_double_array() {
@@ -148,7 +148,7 @@ fn java_runtime_double_array() {
 	assert_eq!(v, vec![1.5f64, 2.5, 3.5]);
 }
 
-// ── java! with boolean[] return type ─────────────────────────────────────────
+// java! with boolean[] return type
 
 #[test]
 fn java_runtime_boolean_array() {
@@ -160,7 +160,7 @@ fn java_runtime_boolean_array() {
 	assert_eq!(v, vec![true, false, true]);
 }
 
-// ── java! with String[] return type ──────────────────────────────────────────
+// java! with String[] return type
 
 #[test]
 fn java_runtime_string_array() {
@@ -172,7 +172,7 @@ fn java_runtime_string_array() {
 	assert_eq!(v, vec!["hello".to_string(), "world".to_string()]);
 }
 
-// ── java! with List<Integer> return type ─────────────────────────────────────
+// java! with List<Integer> return type
 
 #[test]
 fn java_runtime_list_integer() {
@@ -186,7 +186,7 @@ fn java_runtime_list_integer() {
 	assert_eq!(v, vec![10i32, 20, 30]);
 }
 
-// ── java! with List<String> return type ──────────────────────────────────────
+// java! with List<String> return type
 
 #[test]
 fn java_runtime_list_string() {
@@ -199,7 +199,7 @@ fn java_runtime_list_string() {
 	assert_eq!(v, vec!["foo".to_string(), "bar".to_string(), "baz".to_string()]);
 }
 
-// ── java! with abstract class + subclass (OOP) ───────────────────────────────
+// java! with abstract class + subclass (OOP)
 
 #[test]
 fn java_runtime_abstract_class_override() {
@@ -218,7 +218,7 @@ fn java_runtime_abstract_class_override() {
 	assert_eq!(sound, "woof");
 }
 
-// ── java! with empty array ────────────────────────────────────────────────────
+// java! with empty array
 
 #[test]
 fn java_runtime_empty_array() {
@@ -230,7 +230,7 @@ fn java_runtime_empty_array() {
 	assert!(v.is_empty());
 }
 
-// ── ct_java! with int[] return type ──────────────────────────────────────────
+// ct_java! with int[] return type
 
 const CT_INT_ARRAY: [i32; 3] = ct_java! {
 	public static int[] run() {
@@ -243,7 +243,7 @@ fn ct_java_int_array() {
 	assert_eq!(CT_INT_ARRAY, [100i32, 200, 300]);
 }
 
-// ── ct_java! with String[] return type ───────────────────────────────────────
+// ct_java! with String[] return type
 
 const CT_STRING_ARRAY: [&str; 2] = ct_java! {
 	public static String[] run() {

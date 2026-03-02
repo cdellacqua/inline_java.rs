@@ -1,7 +1,7 @@
 use inline_java::{ct_java, java};
 
 fn main() {
-	// ── runtime, no input ────────────────────────────────────────────────────
+	// runtime, no input
 	let x: i32 = java! {
 		import java.util.concurrent.ThreadLocalRandom;
 
@@ -11,7 +11,7 @@ fn main() {
 	}.unwrap();
 	println!("Random from Java: {x}");
 
-	// ── runtime, with input ('var syntax) ───────────────────────────────────
+	// runtime, with input ('var syntax)
 	let n: i32 = 21;
 	let doubled: i32 = java! {
 		public static int run() {
@@ -21,7 +21,7 @@ fn main() {
 	}.unwrap();
 	println!("{n} * 2 = {doubled}");
 
-	// ── runtime, multiple inputs ─────────────────────────────────────────────
+	// runtime, multiple inputs
 	let greeting = "Hello";
 	let target = "World";
 	let msg: String = java! {
@@ -31,7 +31,7 @@ fn main() {
 	}.unwrap();
 	println!("{msg}");
 
-	// ── compile-time constant ────────────────────────────────────────────────
+	// compile-time constant
 	println!("PI (baked at compile time): {PI_APPROX}");
 
 	let imports: String = java! {
@@ -54,7 +54,7 @@ fn main() {
 	}.unwrap();
 	println!("{package}");
 
-	// ── explicit javac + java flags (runtime) ───────────────────────────────
+	// explicit javac + java flags (runtime)
 	let explicit: String = java! {
 		javac = "-sourcepath $CARGO_MANIFEST_DIR",
 		import com.example.demo.*;
@@ -64,10 +64,10 @@ fn main() {
 	}.unwrap();
 	println!("explicit javac sourcepath (java!): {explicit}");
 
-	// ── explicit javac + java flags (compile-time) ───────────────────────────
+	// explicit javac + java flags (compile-time)
 	println!("explicit javac + java flags (ct_java!): {EXPLICIT_CT}");
 
-	// ── runtime int[] ────────────────────────────────────────────────────────
+	// runtime int[]
 	let nums: Vec<i32> = java! {
 		public static int[] run() {
 			return new int[]{10, 20, 30, 40, 50};
@@ -75,7 +75,7 @@ fn main() {
 	}.unwrap();
 	println!("int[] from Java: {nums:?}");
 
-	// ── runtime List<String> ─────────────────────────────────────────────────
+	// runtime List<String>
 	let words: Vec<String> = java! {
 		import java.util.Arrays;
 		public static List<String> run() {
@@ -84,14 +84,14 @@ fn main() {
 	}.unwrap();
 	println!("List<String> from Java: {words:?}");
 
-	// ── compile-time int array baked into binary ──────────────────────────────
+	// compile-time int array baked into binary
 	println!("first 5 primes (ct_java): {PRIMES:?}");
 
-	// ── compile-time String array baked into binary ───────────────────────────
+	// compile-time String array baked into binary
 	println!("days (ct_java): {DAYS:?}");
 }
 
-// ── compile-time with explicit javac and java flags ───────────────────────────
+// compile-time with explicit javac and java flags
 const EXPLICIT_CT: i32 = ct_java! {
 	javac = "-sourcepath /tmp",
 	java = "-Xss512k",
@@ -100,7 +100,7 @@ const EXPLICIT_CT: i32 = ct_java! {
 	}
 };
 
-// ── Compile-time constant: evaluated during rustc macro expansion ────────────
+// Compile-time constant: evaluated during rustc macro expansion
 // Math.PI is baked into the binary; java is never invoked at runtime for this.
 #[allow(clippy::approx_constant)]
 const PI_APPROX: f64 = ct_java! {
@@ -109,14 +109,14 @@ const PI_APPROX: f64 = ct_java! {
 	}
 };
 
-// ── Compile-time int array ───────────────────────────────────────────────────
+// compile-time int array
 const PRIMES: [i32; 5] = ct_java! {
 	public static int[] run() {
 		return new int[]{2, 3, 5, 7, 11};
 	}
 };
 
-// ── Compile-time String array ────────────────────────────────────────────────
+// compile-time String array
 const DAYS: [&str; 3] = ct_java! {
 	public static String[] run() {
 		return new String[]{"Mon", "Tue", "Wed"};
