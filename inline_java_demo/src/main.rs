@@ -1,4 +1,4 @@
-use inline_java_macros::{ct_java, java};
+use inline_java::{ct_java, java};
 
 fn main() {
 	// ── runtime, no input ────────────────────────────────────────────────────
@@ -8,7 +8,7 @@ fn main() {
 		public static int run() {
 			return ThreadLocalRandom.current().nextInt(0, 10);
 		}
-	};
+	}.unwrap();
 	println!("Random from Java: {x}");
 
 	// ── runtime, with input ('var syntax) ───────────────────────────────────
@@ -18,7 +18,7 @@ fn main() {
 			int value = Integer.parseInt('n);
 			return value * 2;
 		}
-	};
+	}.unwrap();
 	println!("{n} * 2 = {doubled}");
 
 	// ── runtime, multiple inputs ─────────────────────────────────────────────
@@ -28,40 +28,40 @@ fn main() {
 		public static String run() {
 			return 'greeting + ", " + 'target + "!";
 		}
-	};
+	}.unwrap();
 	println!("{msg}");
 
 	// ── compile-time constant ────────────────────────────────────────────────
 	println!("PI (baked at compile time): {PI_APPROX}");
 
 	let imports: String = java! {
-		javac = "-sourcepath /home/ubuntu/Dev/inline_java/inline_java_demo",
+		javac = "-sourcepath \"$CARGO_MANIFEST_DIR\"",
 		import com.example.demo.*;
 
 		public static String run() {
 			return new HelloWorld().greet();
 		}
-	};
+	}.unwrap();
 	println!("{imports}");
 
 	let package: String = java! {
-		javac = "-sourcepath /home/ubuntu/Dev/inline_java/inline_java_demo",
+		javac = "-sourcepath $CARGO_MANIFEST_DIR",
 		package com.example.demo;
 
 		public static String run() {
 			return new HelloWorld().greet();
 		}
-	};
+	}.unwrap();
 	println!("{package}");
 
 	// ── explicit javac + java flags (runtime) ───────────────────────────────
 	let explicit: String = java! {
-		javac = "-sourcepath /home/ubuntu/Dev/inline_java/inline_java_demo",
+		javac = "-sourcepath $CARGO_MANIFEST_DIR",
 		import com.example.demo.*;
 		public static String run() {
 			return new HelloWorld().greet();
 		}
-	};
+	}.unwrap();
 	println!("explicit javac sourcepath (java!): {explicit}");
 
 	// ── explicit javac + java flags (compile-time) ───────────────────────────

@@ -1,70 +1,70 @@
-use inline_java_macros::{ct_java, java};
+use inline_java::{ct_java, java};
 
 // ── java = "..." : single system property passed to the JVM ──────────────────
 
 #[test]
 fn java_runtime_single_java_arg() {
-	let val: String = java! {
+	let val: Result<String, _> = java! {
 		java = "-Dinline.test=hello",
 		public static String run() {
 			return System.getProperty("inline.test");
 		}
 	};
-	assert_eq!(val, "hello");
+	assert_eq!(val, Ok("hello".to_string()));
 }
 
 
 #[test]
 fn java_runtime_single_java_arg_with_spaces() {
-	let val: String = java! {
+	let val: Result<String, _> = java! {
 		java = "-Dinline.test='hello world'",
 		public static String run() {
 			return System.getProperty("inline.test");
 		}
 	};
-	assert_eq!(val, "hello world");
+	assert_eq!(val, Ok("hello world".to_string()));
 }
 
 // ── java = "..." : multiple args are split on whitespace ─────────────────────
 
 #[test]
 fn java_runtime_multiple_java_args() {
-	let val: String = java! {
+	let val: Result<String, _> = java! {
 		java = "-Da=foo -Db=bar",
 		public static String run() {
 			return System.getProperty("a") + ":" + System.getProperty("b");
 		}
 	};
-	assert_eq!(val, "foo:bar");
+	assert_eq!(val, Ok("foo:bar".to_string()));
 }
 
 // ── javac = "..." : sourcepath lets javac resolve project Java files ──────────
 
 #[test]
 fn java_runtime_javac_sourcepath() {
-	let val: String = java! {
-		javac = "-sourcepath /home/ubuntu/Dev/inline_java/inline_java_demo",
+	let val: Result<String, _> = java! {
+		javac = "-sourcepath $CARGO_MANIFEST_DIR",
 		import com.example.demo.*;
 		public static String run() {
 			return new HelloWorld().greet();
 		}
 	};
-	assert_eq!(val, "Hello, World!");
+	assert_eq!(val, Ok("Hello, World!".to_string()));
 }
 
 // ── both opts together ────────────────────────────────────────────────────────
 
 #[test]
 fn java_runtime_javac_and_java_args() {
-	let val: String = java! {
-		javac = "-sourcepath /home/ubuntu/Dev/inline_java/inline_java_demo",
+	let val: Result<String, _> = java! {
+		javac = "-sourcepath $CARGO_MANIFEST_DIR",
 		java = "-Dinline.combined=yes",
 		import com.example.demo.*;
 		public static String run() {
 			return new HelloWorld().greet() + "|" + System.getProperty("inline.combined");
 		}
 	};
-	assert_eq!(val, "Hello, World!|yes");
+	assert_eq!(val, Ok("Hello, World!|yes".to_string()));
 }
 
 // ── ct_java! with java = "..." ────────────────────────────────────────────────
@@ -84,7 +84,7 @@ fn ct_java_java_arg() {
 // ── ct_java! with javac = "..." ───────────────────────────────────────────────
 
 const CT_JAVAC_SOURCEPATH: &str = ct_java! {
-	javac = "-sourcepath /home/ubuntu/Dev/inline_java/inline_java_demo",
+	javac = "-sourcepath $CARGO_MANIFEST_DIR",
 	import com.example.demo.*;
 	public static String run() {
 		return new HelloWorld().greet();

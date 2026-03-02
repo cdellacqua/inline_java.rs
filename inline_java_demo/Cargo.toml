@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-inline_java_macros = { path = "../inline_java_macros" }
+inline_java = { path = "../inline_java" }
