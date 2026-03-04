@@ -35,7 +35,7 @@ fn main() {
 	println!("PI (baked at compile time): {PI_APPROX}");
 
 	let imports: String = java! {
-		javac = "-sourcepath $CARGO_MANIFEST_DIR",
+		javac = "-sourcepath .",
 		import com.example.demo.*;
 
 		public static String run() {
@@ -45,7 +45,7 @@ fn main() {
 	println!("{imports}");
 
 	let package: String = java! {
-		javac = "-sourcepath $CARGO_MANIFEST_DIR",
+		javac = "-sourcepath .",
 		package com.example.demo;
 
 		public static String run() {
@@ -56,7 +56,7 @@ fn main() {
 
 	// explicit javac + java flags (runtime)
 	let explicit: String = java! {
-		javac = "-sourcepath $CARGO_MANIFEST_DIR",
+		javac = "-sourcepath .",
 		import com.example.demo.*;
 		public static String run() {
 			return new HelloWorld().greet();

@@ -43,8 +43,8 @@ fn java_runtime_multiple_java_args() {
 #[test]
 fn java_runtime_javac_classpath_jar() {
 	let val: Result<String, _> = java! {
-		javac = "-cp \"$CARGO_MANIFEST_DIR/demo.jar\"",
-		java = "-cp $INLINE_JAVA_CP:$CARGO_MANIFEST_DIR/demo.jar",
+		javac = "-cp \"demo.jar\"",
+		java = "-cp $INLINE_JAVA_CP:demo.jar",
 		import com.example.demo.*;
 		public static String run() {
 			return new HelloWorld().greet();
@@ -56,8 +56,8 @@ fn java_runtime_javac_classpath_jar() {
 #[test]
 fn java_runtime_javac_classpath_jar_long_arg_name() {
 	let val: Result<String, _> = java! {
-		javac = "-classpath \"$CARGO_MANIFEST_DIR/demo.jar\"",
-		java = "-classpath $INLINE_JAVA_CP:$CARGO_MANIFEST_DIR/demo.jar",
+		javac = "-classpath \"demo.jar\"",
+		java = "-classpath $INLINE_JAVA_CP:demo.jar",
 		import com.example.demo.*;
 		public static String run() {
 			return new HelloWorld().greet();
@@ -71,7 +71,7 @@ fn java_runtime_javac_classpath_jar_long_arg_name() {
 #[test]
 fn java_runtime_javac_sourcepath() {
 	let val: Result<String, _> = java! {
-		javac = "-sourcepath $CARGO_MANIFEST_DIR",
+		javac = "-sourcepath .",
 		import com.example.demo.*;
 		public static String run() {
 			return new HelloWorld().greet();
@@ -85,7 +85,7 @@ fn java_runtime_javac_sourcepath() {
 #[test]
 fn java_runtime_javac_and_java_args() {
 	let val: Result<String, _> = java! {
-		javac = "-sourcepath $CARGO_MANIFEST_DIR",
+		javac = "-sourcepath .",
 		java = "-Dinline.combined=yes",
 		import com.example.demo.*;
 		public static String run() {
@@ -112,7 +112,7 @@ fn ct_java_java_arg() {
 // ct_java! with javac = "..."
 
 const CT_JAVAC_SOURCEPATH: &str = ct_java! {
-	javac = "-sourcepath $CARGO_MANIFEST_DIR",
+	javac = "-sourcepath ./inline_java_demo",
 	import com.example.demo.*;
 	public static String run() {
 		return new HelloWorld().greet();
