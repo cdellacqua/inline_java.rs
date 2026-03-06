@@ -24,7 +24,7 @@ to `Result<T, inline_java::JavaError>`.
 use inline_java::java;
 
 let x: i32 = java! {
-    public static int run() {
+    static int run() {
         return 42;
     }
 }.unwrap();
@@ -39,7 +39,7 @@ literal at the call site.
 use inline_java::ct_java;
 
 const PI: f64 = ct_java! {
-    public static double run() {
+    static double run() {
         return Math.PI;
     }
 };
@@ -72,7 +72,7 @@ use inline_java::java;
 let greeting = "Hello";
 let target = "World";
 let msg: String = java! {
-    public static String run() {
+    static String run() {
         return 'greeting + ", " + 'target + "!";
     }
 }.unwrap();
@@ -98,7 +98,7 @@ use inline_java::java;
 let result: String = java! {
     javac = "-sourcepath .",
     import com.example.MyClass;
-    public static String run() {
+    static String run() {
         return new MyClass().greet();
     }
 }.unwrap();

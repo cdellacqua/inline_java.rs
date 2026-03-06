@@ -7,7 +7,7 @@
 //! | [`java!`]   | program runtime |
 //! | [`ct_java!`]| compile time    |
 //!
-//! Both macros require the user to write a `public static <T> run()` method
+//! Both macros require the user to write a `static <T> run()` method
 //! where `T` is one of: `byte`, `short`, `int`, `long`, `float`, `double`,
 //! `boolean`, `char`, `String`, `T[]`, or `List<BoxedT>`.
 //!
@@ -495,7 +495,7 @@ struct ParsedJava {
 	body: String,
 	/// Captured Rust variables: name → original Ident (for span / quoting).
 	vars: BTreeMap<String, Ident>,
-	/// Return type of the `public static T run()` method.
+	/// Return type of the `static T run()` method.
 	java_type: JavaType,
 }
 
@@ -618,25 +618,36 @@ fn reconstruct_body_fallback(
 	parts.join(" ")
 }
 
-/// Scan `tts` for the first `public static <T> run` pattern and return the
-/// corresponding `JavaType` together with the index of the `public` token
-/// within `tts` (so the caller can split outer declarations from the method).
+/// Scan `tts` for the first `[visibility] static <T> run` pattern and return the
+/// corresponding `JavaType` together with the index of the first token of the
+/// method declaration within `tts` (the visibility modifier if present, otherwise
+/// `static`) so the caller can split outer declarations from the method.
+///
+/// The visibility modifier (`public`, `private`, `protected`) is optional; plain
+/// `static <T> run()` is accepted in addition to `static <T> run()`.
 fn parse_run_return_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String> {
-	for i in 0..tts.len().saturating_sub(3) {
-		if !matches!(&tts[i], TokenTree::Ident(id) if id == "public") {
-			continue;
-		}
-		if !matches!(&tts[i + 1], TokenTree::Ident(id) if id == "static") {
+	for i in 0..tts.len().saturating_sub(2) {
+		if !matches!(&tts[i], TokenTree::Ident(id) if id == "static") {
 			continue;
 		}
 
-		// Pattern 1: public static T run  (scalar)
-		if let TokenTree::Ident(type_id) = &tts[i + 2] {
+		// Include an optional preceding visibility modifier in the returned start index.
+		let start = if i > 0
+			&& matches!(&tts[i - 1], TokenTree::Ident(id)
+				if matches!(id.to_string().as_str(), "public" | "private" | "protected"))
+		{
+			i - 1
+		} else {
+			i
+		};
+
+		// Pattern 1: [vis] static T run  (scalar)
+		if let Some(TokenTree::Ident(type_id)) = tts.get(i + 1) {
 			let type_name = type_id.to_string();
 
-			if matches!(&tts.get(i + 3), Some(TokenTree::Ident(id)) if id == "run") {
+			if matches!(tts.get(i + 2), Some(TokenTree::Ident(id)) if id == "run") {
 				return ScalarType::from_primitive_name(&type_name)
-					.map(|s| (JavaType::Scalar(s), i))
+					.map(|s| (JavaType::Scalar(s), start))
 					.ok_or_else(|| {
 						format!(
 							"inline_java: `run()` return type `{type_name}` is not supported; \
@@ -646,18 +657,18 @@ fn parse_run_return_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String>
 					});
 			}
 
-			// Pattern 2: public static T[] run  (array)
+			// Pattern 2: [vis] static T[] run  (array)
 			let is_empty_bracket = matches!(
-				&tts.get(i + 3),
+				tts.get(i + 2),
 				Some(TokenTree::Group(g))
 					if g.delimiter() == proc_macro2::Delimiter::Bracket
 					   && g.stream().is_empty()
 			);
 			if is_empty_bracket
-				&& matches!(&tts.get(i + 4), Some(TokenTree::Ident(id)) if id == "run")
+				&& matches!(tts.get(i + 3), Some(TokenTree::Ident(id)) if id == "run")
 			{
 				return ScalarType::from_primitive_name(&type_name)
-					.map(|s| (JavaType::Array(s), i))
+					.map(|s| (JavaType::Array(s), start))
 					.ok_or_else(|| {
 						format!(
 							"inline_java: `run()` array element type `{type_name}` is not supported; \
@@ -667,17 +678,17 @@ fn parse_run_return_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String>
 			}
 		}
 
-		// Pattern 3: public static List < BoxedT > run  (List<T>)
-		if matches!(&tts[i + 2], TokenTree::Ident(id) if id == "List")
-			&& matches!(&tts.get(i + 3), Some(TokenTree::Punct(p)) if p.as_char() == '<')
-			&& let Some(TokenTree::Ident(inner_id)) = tts.get(i + 4)
+		// Pattern 3: [vis] static List < BoxedT > run  (List<T>)
+		if matches!(tts.get(i + 1), Some(TokenTree::Ident(id)) if id == "List")
+			&& matches!(tts.get(i + 2), Some(TokenTree::Punct(p)) if p.as_char() == '<')
+			&& let Some(TokenTree::Ident(inner_id)) = tts.get(i + 3)
 		{
 			let inner_name = inner_id.to_string();
-			if matches!(&tts.get(i + 5), Some(TokenTree::Punct(p)) if p.as_char() == '>')
-				&& matches!(&tts.get(i + 6), Some(TokenTree::Ident(id)) if id == "run")
+			if matches!(tts.get(i + 4), Some(TokenTree::Punct(p)) if p.as_char() == '>')
+				&& matches!(tts.get(i + 5), Some(TokenTree::Ident(id)) if id == "run")
 			{
 				return ScalarType::from_boxed_name(&inner_name)
-					.map(|s| (JavaType::List(s), i))
+					.map(|s| (JavaType::List(s), start))
 					.ok_or_else(|| {
 						format!(
 							"inline_java: `run()` List element type `{inner_name}` is not supported; \
@@ -687,20 +698,20 @@ fn parse_run_return_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String>
 			}
 		}
 
-		// Pattern 4: public static java.util.List < BoxedT > run
-		if matches!(&tts[i + 2], TokenTree::Ident(id) if id == "java")
-			&& matches!(&tts.get(i + 3), Some(TokenTree::Punct(p)) if p.as_char() == '.')
-			&& matches!(&tts.get(i + 4), Some(TokenTree::Ident(id)) if id == "util")
-			&& matches!(&tts.get(i + 5), Some(TokenTree::Punct(p)) if p.as_char() == '.')
-			&& matches!(&tts.get(i + 6), Some(TokenTree::Ident(id)) if id == "List")
-			&& matches!(&tts.get(i + 7), Some(TokenTree::Punct(p)) if p.as_char() == '<')
-			&& let Some(TokenTree::Ident(inner_id)) = tts.get(i + 8)
-			&& matches!(&tts.get(i + 9), Some(TokenTree::Punct(p)) if p.as_char() == '>')
-			&& matches!(&tts.get(i + 10), Some(TokenTree::Ident(id)) if id == "run")
+		// Pattern 4: [vis] static java.util.List < BoxedT > run
+		if matches!(tts.get(i + 1), Some(TokenTree::Ident(id)) if id == "java")
+			&& matches!(tts.get(i + 2), Some(TokenTree::Punct(p)) if p.as_char() == '.')
+			&& matches!(tts.get(i + 3), Some(TokenTree::Ident(id)) if id == "util")
+			&& matches!(tts.get(i + 4), Some(TokenTree::Punct(p)) if p.as_char() == '.')
+			&& matches!(tts.get(i + 5), Some(TokenTree::Ident(id)) if id == "List")
+			&& matches!(tts.get(i + 6), Some(TokenTree::Punct(p)) if p.as_char() == '<')
+			&& let Some(TokenTree::Ident(inner_id)) = tts.get(i + 7)
+			&& matches!(tts.get(i + 8), Some(TokenTree::Punct(p)) if p.as_char() == '>')
+			&& matches!(tts.get(i + 9), Some(TokenTree::Ident(id)) if id == "run")
 		{
 			let inner_name = inner_id.to_string();
 			return ScalarType::from_boxed_name(&inner_name)
-				.map(|s| (JavaType::List(s), i))
+				.map(|s| (JavaType::List(s), start))
 				.ok_or_else(|| {
 					format!(
 						"inline_java: `run()` List element type `{inner_name}` is not supported; \
@@ -709,7 +720,7 @@ fn parse_run_return_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String>
 				});
 		}
 	}
-	Err("inline_java: could not find `public static <type> run()` in Java body".to_string())
+	Err("inline_java: could not find `static <type> run()` in Java body".to_string())
 }
 
 /// Unified parser: walks the token stream once to separate `import`/`package`
@@ -799,10 +810,10 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 		_ => String::new(),
 	};
 
-	// outer: any tokens between the end of imports and `public static T run`
+	// outer: any tokens between the end of imports and the `run` method declaration
 	let outer = slice_text(body_start, run_abs_idx);
 
-	// body: from `public static T run` to end, with var substitution.
+	// body: from the `run` method declaration to end, with var substitution.
 	let body = if run_abs_idx < tts.len() {
 		let start_span = tts[run_abs_idx].span();
 		let end_span = tts.last().unwrap().span();
@@ -835,7 +846,7 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 /// Compile and run Java code at *program runtime*, returning the value of `run()`.
 ///
 /// Wraps the provided Java body in a generated class, compiles it with `javac`,
-/// and executes it with `java`.  The return value of `public static T run()` is
+/// and executes it with `java`.  The return value of `static T run()` is
 /// binary-serialised by the generated `main()` and deserialised to the inferred
 /// Rust type.
 ///
@@ -859,12 +870,12 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 ///
 /// # Examples
 ///
-/// ```rust,no_run
+/// ```text
 /// use inline_java::java;
 ///
 /// // Scalar return value
 /// let x: i32 = java! {
-///     public static int run() {
+///     static int run() {
 ///         return 42;
 ///     }
 /// }.unwrap();
@@ -872,7 +883,7 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 /// // Variable injection
 /// let n: i32 = 21;
 /// let doubled: i32 = java! {
-///     public static int run() {
+///     static int run() {
 ///         int value = Integer.parseInt('n);
 ///         return value * 2;
 ///     }
@@ -880,7 +891,7 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 ///
 /// // Array return
 /// let primes: Vec<i32> = java! {
-///     public static int[] run() {
+///     static int[] run() {
 ///         return new int[]{2, 3, 5, 7, 11};
 ///     }
 /// }.unwrap();
@@ -889,9 +900,14 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 /// let greeting: String = java! {
 ///     javac = "-sourcepath .",
 ///     import com.example.demo.*;
-///     public static String run() {
+///     static String run() {
 ///         return new HelloWorld().greet();
 ///     }
+/// }.unwrap();
+///
+/// // Visibility modifiers are accepted — `public`, `private`, `protected` all work
+/// let v: i32 = java! {
+///     public static int run() { return 99; }
 /// }.unwrap();
 /// ```
 #[proc_macro]
@@ -973,7 +989,7 @@ pub fn java(input: TokenStream) -> TokenStream {
 /// Run Java at *compile time* and splice its return value as a Rust literal.
 ///
 /// Accepts optional `javac = "..."` and `java = "..."` key-value pairs before
-/// the Java body.  The user provides a `public static <T> run()` method; its
+/// the Java body.  The user provides a `static <T> run()` method; its
 /// binary-serialised return value is decoded and emitted as a Rust literal at
 /// the call site (`42`, `3.14`, `true`, `'x'`, `"hello"`, `[1, 2, 3]`, …).
 ///
@@ -981,26 +997,26 @@ pub fn java(input: TokenStream) -> TokenStream {
 ///
 /// # Examples
 ///
-/// ```rust,no_run
+/// ```text
 /// use inline_java::ct_java;
 ///
 /// // Numeric constant computed at compile time
 /// const PI_APPROX: f64 = ct_java! {
-///     public static double run() {
+///     static double run() {
 ///         return Math.PI;
 ///     }
 /// };
 ///
 /// // String constant
 /// const GREETING: &str = ct_java! {
-///     public static String run() {
+///     static String run() {
 ///         return "Hello, World!";
 ///     }
 /// };
 ///
 /// // Array constant
 /// const PRIMES: [i32; 5] = ct_java! {
-///     public static int[] run() {
+///     static int[] run() {
 ///         return new int[]{2, 3, 5, 7, 11};
 ///     }
 /// };

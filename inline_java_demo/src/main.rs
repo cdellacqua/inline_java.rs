@@ -5,7 +5,7 @@ fn main() {
 	let x: i32 = java! {
 		import java.util.concurrent.ThreadLocalRandom;
 
-		public static int run() {
+		static int run() {
 			return ThreadLocalRandom.current().nextInt(0, 10);
 		}
 	}.unwrap();
@@ -14,7 +14,7 @@ fn main() {
 	// runtime, with input ('var syntax)
 	let n: i32 = 21;
 	let doubled: i32 = java! {
-		public static int run() {
+		static int run() {
 			int value = Integer.parseInt('n);
 			return value * 2;
 		}
@@ -25,7 +25,7 @@ fn main() {
 	let greeting = "Hello";
 	let target = "World";
 	let msg: String = java! {
-		public static String run() {
+		static String run() {
 			return 'greeting + ", " + 'target + "!";
 		}
 	}.unwrap();
@@ -38,7 +38,7 @@ fn main() {
 		javac = "-sourcepath .",
 		import com.example.demo.*;
 
-		public static String run() {
+		static String run() {
 			return new HelloWorld().greet();
 		}
 	}.unwrap();
@@ -48,7 +48,7 @@ fn main() {
 		javac = "-sourcepath .",
 		package com.example.demo;
 
-		public static String run() {
+		static String run() {
 			return new HelloWorld().greet();
 		}
 	}.unwrap();
@@ -58,7 +58,7 @@ fn main() {
 	let explicit: String = java! {
 		javac = "-sourcepath .",
 		import com.example.demo.*;
-		public static String run() {
+		static String run() {
 			return new HelloWorld().greet();
 		}
 	}.unwrap();
@@ -69,7 +69,7 @@ fn main() {
 
 	// runtime int[]
 	let nums: Vec<i32> = java! {
-		public static int[] run() {
+		static int[] run() {
 			return new int[]{10, 20, 30, 40, 50};
 		}
 	}.unwrap();
@@ -79,7 +79,7 @@ fn main() {
 	let words: Vec<String> = java! {
 		import java.util.Arrays;
 		import java.util.List;
-		public static List<String> run() {
+		static List<String> run() {
 			return Arrays.asList("alpha", "beta", "gamma");
 		}
 	}.unwrap();
@@ -96,7 +96,7 @@ fn main() {
 const EXPLICIT_CT: i32 = ct_java! {
 	javac = "-sourcepath /tmp",
 	java = "-Xss512k",
-	public static int run() {
+	static int run() {
 		return 1 + 1;
 	}
 };
@@ -105,21 +105,21 @@ const EXPLICIT_CT: i32 = ct_java! {
 // Math.PI is baked into the binary; java is never invoked at runtime for this.
 #[allow(clippy::approx_constant)]
 const PI_APPROX: f64 = ct_java! {
-	public static double run() {
+	static double run() {
 		return Math.PI;
 	}
 };
 
 // compile-time int array
 const PRIMES: [i32; 5] = ct_java! {
-	public static int[] run() {
+	static int[] run() {
 		return new int[]{2, 3, 5, 7, 11};
 	}
 };
 
 // compile-time String array
 const DAYS: [&str; 3] = ct_java! {
-	public static String[] run() {
+	static String[] run() {
 		return new String[]{"Mon", "Tue", "Wed"};
 	}
 };

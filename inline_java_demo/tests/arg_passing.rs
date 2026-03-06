@@ -6,7 +6,7 @@ use inline_java::{ct_java, java};
 fn java_runtime_single_java_arg() {
 	let val: Result<String, _> = java! {
 		java = "-Dinline.test=hello",
-		public static String run() {
+		static String run() {
 			return System.getProperty("inline.test");
 		}
 	};
@@ -18,7 +18,7 @@ fn java_runtime_single_java_arg() {
 fn java_runtime_single_java_arg_with_spaces() {
 	let val: Result<String, _> = java! {
 		java = "-Dinline.test='hello world'",
-		public static String run() {
+		static String run() {
 			return System.getProperty("inline.test");
 		}
 	};
@@ -31,7 +31,7 @@ fn java_runtime_single_java_arg_with_spaces() {
 fn java_runtime_multiple_java_args() {
 	let val: Result<String, _> = java! {
 		java = "-Da=foo -Db=bar",
-		public static String run() {
+		static String run() {
 			return System.getProperty("a") + ":" + System.getProperty("b");
 		}
 	};
@@ -46,7 +46,7 @@ fn java_runtime_javac_classpath_jar() {
 		javac = "-cp \"demo.jar\"",
 		java = "-cp $INLINE_JAVA_CP:demo.jar",
 		import com.example.demo.*;
-		public static String run() {
+		static String run() {
 			return new HelloWorld().greet();
 		}
 	};
@@ -59,7 +59,7 @@ fn java_runtime_javac_classpath_jar_long_arg_name() {
 		javac = "-classpath \"demo.jar\"",
 		java = "-classpath $INLINE_JAVA_CP:demo.jar",
 		import com.example.demo.*;
-		public static String run() {
+		static String run() {
 			return new HelloWorld().greet();
 		}
 	};
@@ -73,7 +73,7 @@ fn java_runtime_javac_sourcepath() {
 	let val: Result<String, _> = java! {
 		javac = "-sourcepath .",
 		import com.example.demo.*;
-		public static String run() {
+		static String run() {
 			return new HelloWorld().greet();
 		}
 	};
@@ -88,7 +88,7 @@ fn java_runtime_javac_and_java_args() {
 		javac = "-sourcepath .",
 		java = "-Dinline.combined=yes",
 		import com.example.demo.*;
-		public static String run() {
+		static String run() {
 			return new HelloWorld().greet() + "|" + System.getProperty("inline.combined");
 		}
 	};
@@ -99,7 +99,7 @@ fn java_runtime_javac_and_java_args() {
 
 const CT_JAVA_ARG: &str = ct_java! {
 	java = "-Dinline.ct=compile-time",
-	public static String run() {
+	static String run() {
 		return System.getProperty("inline.ct");
 	}
 };
@@ -114,7 +114,7 @@ fn ct_java_java_arg() {
 const CT_JAVAC_SOURCEPATH: &str = ct_java! {
 	javac = "-sourcepath ./inline_java_demo",
 	import com.example.demo.*;
-	public static String run() {
+	static String run() {
 		return new HelloWorld().greet();
 	}
 };
@@ -129,7 +129,7 @@ fn ct_java_javac_sourcepath() {
 #[test]
 fn java_runtime_int_array() {
 	let v: Vec<i32> = java! {
-		public static int[] run() {
+		static int[] run() {
 			return new int[]{1, 2, 3, 4, 5};
 		}
 	}.unwrap();
@@ -141,7 +141,7 @@ fn java_runtime_int_array() {
 #[test]
 fn java_runtime_double_array() {
 	let v: Vec<f64> = java! {
-		public static double[] run() {
+		static double[] run() {
 			return new double[]{1.5, 2.5, 3.5};
 		}
 	}.unwrap();
@@ -153,7 +153,7 @@ fn java_runtime_double_array() {
 #[test]
 fn java_runtime_boolean_array() {
 	let v: Vec<bool> = java! {
-		public static boolean[] run() {
+		static boolean[] run() {
 			return new boolean[]{true, false, true};
 		}
 	}.unwrap();
@@ -165,7 +165,7 @@ fn java_runtime_boolean_array() {
 #[test]
 fn java_runtime_string_array() {
 	let v: Vec<String> = java! {
-		public static String[] run() {
+		static String[] run() {
 			return new String[]{"hello", "world"};
 		}
 	}.unwrap();
@@ -179,7 +179,7 @@ fn java_runtime_list_integer() {
 	let v: Vec<i32> = java! {
 		import java.util.Arrays;
 		import java.util.List;
-		public static List<Integer> run() {
+		static List<Integer> run() {
 			return Arrays.asList(10, 20, 30);
 		}
 	}.unwrap();
@@ -192,7 +192,7 @@ fn java_runtime_list_integer() {
 fn java_runtime_list_string() {
 	let v: Vec<String> = java! {
 		import java.util.Arrays;
-		public static java.util.List<String> run() {
+		static java.util.List<String> run() {
 			return Arrays.asList("foo", "bar", "baz");
 		}
 	}.unwrap();
@@ -211,7 +211,7 @@ fn java_runtime_abstract_class_override() {
 			@Override
 			String sound() { return "woof"; }
 		}
-		public static String run() {
+		static String run() {
 			return new Dog().sound();
 		}
 	}.unwrap();
@@ -223,7 +223,7 @@ fn java_runtime_abstract_class_override() {
 #[test]
 fn java_runtime_empty_array() {
 	let v: Vec<i32> = java! {
-		public static int[] run() {
+		static int[] run() {
 			return new int[]{};
 		}
 	}.unwrap();
@@ -233,7 +233,7 @@ fn java_runtime_empty_array() {
 // ct_java! with int[] return type
 
 const CT_INT_ARRAY: [i32; 3] = ct_java! {
-	public static int[] run() {
+	static int[] run() {
 		return new int[]{100, 200, 300};
 	}
 };
@@ -246,7 +246,7 @@ fn ct_java_int_array() {
 // ct_java! with String[] return type
 
 const CT_STRING_ARRAY: [&str; 2] = ct_java! {
-	public static String[] run() {
+	static String[] run() {
 		return new String[]{"compile", "time"};
 	}
 };

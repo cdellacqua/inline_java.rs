@@ -10,7 +10,7 @@
 //! use inline_java::java;
 //!
 //! let x: i32 = java! {
-//!     public static int run() {
+//!     static int run() {
 //!         return 42;
 //!     }
 //! }.unwrap();
@@ -25,7 +25,7 @@
 //! use inline_java::ct_java;
 //!
 //! const PI: f64 = ct_java! {
-//!     public static double run() {
+//!     static double run() {
 //!         return Math.PI;
 //!     }
 //! };
@@ -47,7 +47,7 @@
 //!
 //! let n: i32 = 21;
 //! let doubled: i32 = java! {
-//!     public static int run() {
+//!     static int run() {
 //!         int value = Integer.parseInt('n);
 //!         return value * 2;
 //!     }
