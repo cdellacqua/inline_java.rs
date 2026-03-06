@@ -2,6 +2,7 @@
 resolver = "2"
 
 members = [
+  "inline_java_core",
   "inline_java_macros",
   "inline_java",
   "inline_java_demo",

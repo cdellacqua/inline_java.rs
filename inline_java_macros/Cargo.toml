@@ -7,8 +7,7 @@ edition = "2024"
 proc-macro = true
 
 [dependencies]
+inline_java_core = { path = "../inline_java_core" }
 proc-macro2 = { version = "1.0.106", features = ["span-locations"] }
 quote = "1.0.44"
 litrs = { version = "1.0.0", features = ["proc-macro2"] }
-shellexpand = "3.1.2"
-fd-lock = "4.0.4"

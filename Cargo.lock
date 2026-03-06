@@ -71,8 +71,15 @@ dependencies = [
 name = "inline_java"
 version = "0.1.0"
 dependencies = [
- "fd-lock",
+ "inline_java_core",
  "inline_java_macros",
+]
+
+[[package]]
+name = "inline_java_core"
+version = "0.1.0"
+dependencies = [
+ "fd-lock",
  "shellexpand",
  "thiserror",
 ]
@@ -88,11 +95,10 @@ dependencies = [
 name = "inline_java_macros"
 version = "0.1.0"
 dependencies = [
- "fd-lock",
+ "inline_java_core",
  "litrs",
  "proc-macro2",
  "quote",
- "shellexpand",
 ]
 
 [[package]]

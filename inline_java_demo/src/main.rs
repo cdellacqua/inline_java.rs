@@ -78,6 +78,7 @@ fn main() {
 	// runtime List<String>
 	let words: Vec<String> = java! {
 		import java.util.Arrays;
+		import java.util.List;
 		public static List<String> run() {
 			return Arrays.asList("alpha", "beta", "gamma");
 		}

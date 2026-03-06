@@ -904,22 +904,12 @@ pub fn java(input: TokenStream) -> TokenStream {
 	// Unique class name derived from source content and compilation options.
 	// opts are included so that two call sites with the same body but different
 	// javac/java args get separate temp dirs (and separate .done sentinels).
-	let mut h = DefaultHasher::new();
-	imports.hash(&mut h);
-	outer.hash(&mut h);
-	body.hash(&mut h);
-	opts.javac_args.hash(&mut h);
-	opts.java_args.hash(&mut h);
-	let class_name = format!("InlineJava_{:016x}", h.finish());
+	let class_name = make_class_name("InlineJava", &imports, &outer, &body, &opts);
 	let filename = format!("{class_name}.java");
 
 	// If the user wrote a `package` declaration, the class must be run by its
 	// fully-qualified name (e.g. `com.example.demo.InlineJava_xxx`).
-	let package_name = parse_package_name(&imports);
-	let full_class_name = match &package_name {
-		Some(pkg) => format!("{pkg}.{class_name}"),
-		None => class_name.clone(),
-	};
+	let full_class_name = qualify_class_name(&class_name, &imports);
 
 	// `static String _RUST_foo;` declarations, one per captured variable.
 	let var_fields: String = vars.keys().fold(String::new(), |mut s, name| {
@@ -937,12 +927,10 @@ pub fn java(input: TokenStream) -> TokenStream {
 		});
 
 	let main_method = java_type.java_main(&var_inits);
-	let java_class = format!(
-		"{imports}\n{outer}\npublic class {class_name} {{\n{var_fields}\n{body}\n\n{main_method}\n}}\n"
-	);
+	let java_class = format_java_class(&imports, &outer, &class_name, &var_fields, &body, &main_method);
 
-	// Raw option strings — shellexpand runs at runtime so that $INLINE_JAVA_CP
-	// resolves to the actual (PID-qualified) temp dir.
+	// Option strings are baked into the generated code as string literals;
+	// shell expansion happens at program runtime via `inline_java::run_java`.
 	let javac_raw = opts.javac_args.unwrap_or_default();
 	let java_raw = opts.java_args.unwrap_or_default();
 	let var_idents: Vec<Ident> = vars.values().cloned().collect();
@@ -950,74 +938,15 @@ pub fn java(input: TokenStream) -> TokenStream {
 
 	let generated = quote! {
 		(|| -> ::std::result::Result<_, ::inline_java::JavaError> {
-			// Temp dir: deterministic by source hash, shared across processes.
-			let _tmp_dir = ::std::env::temp_dir().join(#class_name);
-			let _cp = _tmp_dir.to_string_lossy().into_owned();
-
-			// Expand $INLINE_JAVA_CP and other shell variables at runtime.
-			let _javac_extra = ::inline_java::expand_java_args(#javac_raw, &_cp);
-			let _java_extra  = ::inline_java::expand_java_args(#java_raw,  &_cp);
-
-			// Skip compilation if a previous run (same or different process) already
-			// produced the .class files.  The .done sentinel is the source of truth;
-			// we never cache its value in-process so /tmp being cleared is handled
-			// automatically on the next invocation.
-			if !_tmp_dir.join(".done").exists() {
-				::std::fs::create_dir_all(&_tmp_dir)
-					.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
-
-				// Serialise write+compile across threads and processes via file lock.
-				// The lock is released automatically on drop (even on panic/crash).
-				let _lock_file = ::std::fs::OpenOptions::new()
-					.create(true).write(true)
-					.open(_tmp_dir.join(".lock"))
-					.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
-				let mut _lock = ::inline_java::fd_lock::RwLock::new(_lock_file);
-				let _guard = _lock.write()
-					.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
-
-				// Double-check: another thread/process may have compiled while we waited.
-				if !_tmp_dir.join(".done").exists() {
-					let _src = _tmp_dir.join(#filename);
-					::std::fs::write(&_src, #java_class)
-						.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
-
-					// Compile phase.
-					let mut _javac_cmd = ::std::process::Command::new("javac");
-					for _arg in &_javac_extra { _javac_cmd.arg(_arg); }
-					let _javac_out = _javac_cmd
-						.arg("-d").arg(&_tmp_dir)
-						.arg(&_src)
-						.output()
-						.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
-					if !_javac_out.status.success() {
-						return Err(::inline_java::JavaError::CompilationFailed(
-							::std::string::String::from_utf8_lossy(&_javac_out.stderr).into_owned()
-						));
-					}
-
-					::std::fs::write(_tmp_dir.join(".done"), b"")
-						.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
-				}
-			}
-
-			// Run phase.  The default `-cp $tmpdir` comes first; any `-cp`
-			// supplied via `java = "..."` will override it (last flag wins).
-			let mut _java_cmd = ::std::process::Command::new("java");
-			_java_cmd.arg("-cp").arg(&_tmp_dir);
-			for _arg in &_java_extra { _java_cmd.arg(_arg); }
-			let _java_out = _java_cmd
-				.arg(#full_class_name)
-				#(.arg(::std::string::ToString::to_string(&#var_idents)))*
-				.output()
-				.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
-			if !_java_out.status.success() {
-				return Err(::inline_java::JavaError::RuntimeFailed(
-					::std::string::String::from_utf8_lossy(&_java_out.stderr).into_owned()
-				));
-			}
-
-			let _raw = _java_out.stdout;
+			let _raw = ::inline_java::run_java(
+				#class_name,
+				#filename,
+				#java_class,
+				#full_class_name,
+				#javac_raw,
+				#java_raw,
+				&[#(::std::string::ToString::to_string(&#var_idents)),*],
+			)?;
 			::std::result::Result::Ok(#deser)
 		})()
 	};
@@ -1054,99 +983,22 @@ fn ct_java_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStr
 		..
 	} = parse_java_source(input)?;
 
-	let mut h = DefaultHasher::new();
-	imports.hash(&mut h);
-	outer.hash(&mut h);
-	body.hash(&mut h);
-	opts.javac_args.hash(&mut h);
-	opts.java_args.hash(&mut h);
-	let class_name = format!("CtJava_{:016x}", h.finish());
+	let class_name = make_class_name("CtJava", &imports, &outer, &body, &opts);
 	let filename = format!("{class_name}.java");
-
-	let package_name = parse_package_name(&imports);
-	let full_class_name = match &package_name {
-		Some(pkg) => format!("{pkg}.{class_name}"),
-		None => class_name.clone(),
-	};
+	let full_class_name = qualify_class_name(&class_name, &imports);
 
 	let main_method = java_type.java_main("");
-	let java_class =
-		format!("{imports}\n{outer}\npublic class {class_name} {{\n{body}\n\n{main_method}\n}}\n");
+	let java_class = format_java_class(&imports, &outer, &class_name, "", &body, &main_method);
 
-	let tmp_dir = std::env::temp_dir().join(&class_name);
-	std::fs::create_dir_all(&tmp_dir)
-		.map_err(|e| format!("ct_java: failed to create temp dir: {e}"))?;
-
-	let inline_java_cp = tmp_dir.to_string_lossy().into_owned();
-
-	let java_compiler_extra: Vec<String> = opts
-		.javac_args
-		.map(|a| split_args(&shellexpand_with_cp(&a, &inline_java_cp)))
-		.unwrap_or_default();
-	let java_runtime_extra: Vec<String> = opts
-		.java_args
-		.map(|a| split_args(&shellexpand_with_cp(&a, &inline_java_cp)))
-		.unwrap_or_default();
-
-	// Serialise write+compile across parallel proc-macro processes via file lock.
-	// The lock is released automatically on drop (even on panic/crash).
-	let lock_file = std::fs::OpenOptions::new()
-		.create(true)
-		.write(true)
-		.open(tmp_dir.join(".lock"))
-		.map_err(|e| format!("ct_java: failed to open lock file: {e}"))?;
-	let mut lock = fd_lock::RwLock::new(lock_file);
-	let _guard = lock
-		.write()
-		.map_err(|e| format!("ct_java: failed to acquire lock: {e}"))?;
-
-	// Skip compilation if a previous build already produced the .class files.
-	if !tmp_dir.join(".done").exists() {
-		let src = tmp_dir.join(&filename);
-		std::fs::write(&src, &java_class)
-			.map_err(|e| format!("ct_java: failed to write .java source: {e}"))?;
-
-		// Compile phase.
-		let mut java_compiler_cmd = std::process::Command::new("javac");
-		for arg in &java_compiler_extra {
-			java_compiler_cmd.arg(arg);
-		}
-		let java_compiler_output = java_compiler_cmd
-			.arg("-d")
-			.arg(&tmp_dir)
-			.arg(&src)
-			.output()
-			.map_err(|e| format!("ct_java: could not invoke javac (is it on PATH?): {e}"))?;
-		if !java_compiler_output.status.success() {
-			return Err(format!(
-				"ct_java: javac failed:\n{}",
-				String::from_utf8_lossy(&java_compiler_output.stderr)
-			));
-		}
-
-		std::fs::write(tmp_dir.join(".done"), b"")
-			.map_err(|e| format!("ct_java: failed to write .done sentinel: {e}"))?;
-	}
-
-	// Run phase.  The default `-cp $tmpdir` comes first; any `-cp` supplied
-	// via `java = "..."` (referencing $INLINE_JAVA_CP) overrides it.
-	let mut java_cmd = std::process::Command::new("java");
-	java_cmd.arg("-cp").arg(&tmp_dir);
-	for arg in &java_runtime_extra {
-		java_cmd.arg(arg);
-	}
-	let java_output = java_cmd
-		.arg(&full_class_name)
-		.output()
-		.map_err(|e| format!("ct_java: could not invoke java (is it on PATH?): {e}"))?;
-	if !java_output.status.success() {
-		return Err(format!(
-			"ct_java: java failed:\n{}",
-			String::from_utf8_lossy(&java_output.stderr)
-		));
-	}
-
-	java_type.ct_java_tokens(java_output.stdout)
+	let bytes = compile_run_java_now(
+		&class_name,
+		&filename,
+		&java_class,
+		&full_class_name,
+		opts.javac_args,
+		opts.java_args,
+	)?;
+	java_type.ct_java_tokens(bytes)
 }
 
 // Option extraction: `javac = "…"` / `java = "…"` before the Java body
@@ -1158,55 +1010,6 @@ struct JavaOpts {
 	java_args: Option<String>,
 }
 
-/// Shell-expand `s` with `INLINE_JAVA_CP` injected as a virtual variable
-/// (resolved to `inline_java_cp`) without mutating the process environment.
-/// All other `$VAR` references fall back to `std::env::var`.
-fn shellexpand_with_cp(s: &str, inline_java_cp: &str) -> String {
-	let cp = inline_java_cp.to_owned();
-	shellexpand::full_with_context_no_errors(
-		s,
-		|| std::env::var("HOME").ok(),
-		move |var| match var {
-			"INLINE_JAVA_CP" => Some(cp.clone()),
-			other => std::env::var(other).ok(),
-		},
-	)
-	.into_owned()
-}
-
-/// Split a shell-style argument string into individual arguments, respecting
-/// single- and double-quoted spans.  Quotes are stripped; content inside them
-/// is treated as a single token even if it contains whitespace.
-///
-/// Examples:
-/// ```text
-///   "-sourcepath /tmp"     → ["-sourcepath", "/tmp"]
-///   "-Dprop='hello world'" → ["-Dprop=hello world"]
-///   "-Da=\"x y\" -Db=z"    → ["-Da=x y", "-Db=z"]
-/// ```
-fn split_args(s: &str) -> Vec<String> {
-	let mut args: Vec<String> = Vec::new();
-	let mut cur = String::new();
-	let mut in_single = false;
-	let mut in_double = false;
-
-	for ch in s.chars() {
-		match ch {
-			'\'' if !in_double => in_single = !in_single,
-			'"' if !in_single => in_double = !in_double,
-			' ' | '\t' if !in_single && !in_double => {
-				if !cur.is_empty() {
-					args.push(std::mem::take(&mut cur));
-				}
-			}
-			_ => cur.push(ch),
-		}
-	}
-	if !cur.is_empty() {
-		args.push(cur);
-	}
-	args
-}
 
 /// Consume leading `javac = "…"` / `java = "…"` option pairs (comma-separated,
 /// trailing comma optional) and return the remaining token stream as the Java
@@ -1261,6 +1064,67 @@ fn try_parse_opt(tts: &[TokenTree]) -> Option<(String, String, usize)> {
 	};
 	let value = litrs::StringLit::try_from(lit).ok()?.value().to_owned();
 	Some((key, value, 3))
+}
+
+// Shared helpers used by both java! and ct_java!
+
+/// Compute a deterministic class name by hashing the source and options.
+/// `prefix` distinguishes runtime ("InlineJava") from compile-time ("CtJava").
+fn make_class_name(prefix: &str, imports: &str, outer: &str, body: &str, opts: &JavaOpts) -> String {
+	let mut h = DefaultHasher::new();
+	imports.hash(&mut h);
+	outer.hash(&mut h);
+	body.hash(&mut h);
+	opts.javac_args.hash(&mut h);
+	opts.java_args.hash(&mut h);
+	format!("{prefix}_{:016x}", h.finish())
+}
+
+/// Qualify `class_name` with its package if `imports` contains a `package`
+/// declaration (e.g. `"com.example.InlineJava_xxx"`).
+fn qualify_class_name(class_name: &str, imports: &str) -> String {
+	match parse_package_name(imports) {
+		Some(pkg) => format!("{pkg}.{class_name}"),
+		None => class_name.to_owned(),
+	}
+}
+
+/// Compile (if needed) and run a Java class at *compile time*, returning raw
+/// stdout bytes.  Delegates to `inline_java_core::run_java` and maps
+/// `JavaError` to `String` for use as a `compile_error!` diagnostic.
+fn compile_run_java_now(
+	class_name: &str,
+	filename: &str,
+	java_class: &str,
+	full_class_name: &str,
+	javac_raw: Option<String>,
+	java_raw: Option<String>,
+) -> Result<Vec<u8>, String> {
+	inline_java_core::run_java(
+		class_name,
+		filename,
+		java_class,
+		full_class_name,
+		javac_raw.as_deref().unwrap_or(""),
+		java_raw.as_deref().unwrap_or(""),
+		&[],
+	)
+	.map_err(|e| e.to_string())
+}
+
+/// Render the complete `.java` source file.  Pass `var_fields = ""` when
+/// there are no injected Rust variables (i.e. for `ct_java!`).
+fn format_java_class(
+	imports: &str,
+	outer: &str,
+	class_name: &str,
+	var_fields: &str,
+	body: &str,
+	main_method: &str,
+) -> String {
+	format!(
+		"{imports}\n{outer}\npublic class {class_name} {{\n{var_fields}\n{body}\n\n{main_method}\n}}\n"
+	)
 }
 
 // Package name extraction

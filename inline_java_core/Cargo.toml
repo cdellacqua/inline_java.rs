@@ -1,0 +1,9 @@
+[package]
+name = "inline_java_core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+thiserror = "2.0.18"
+shellexpand = "3.1.2"
+fd-lock = "4.0.4"
