@@ -88,7 +88,15 @@ fn split_args(s: &str) -> Vec<String> {
 /// - `javac_raw`       — raw `javac = "..."` option string (shell-expanded).
 /// - `java_raw`        — raw `java  = "..."` option string (shell-expanded).
 /// - `var_values`      — Rust variable values injected via `'var` syntax, in
-///                       alphabetical order (may be empty).
+///   alphabetical order (may be empty).
+///
+/// # Errors
+///
+/// Returns [`JavaError::Io`] if the temp directory, source file, or lock file
+/// cannot be created, or if `javac`/`java` cannot be spawned.
+/// Returns [`JavaError::CompilationFailed`] if `javac` exits with a non-zero status.
+/// Returns [`JavaError::RuntimeFailed`] if `java` exits with a non-zero status.
+#[allow(clippy::similar_names)]
 pub fn run_java(
 	class_name: &str,
 	filename: &str,
@@ -108,6 +116,7 @@ pub fn run_java(
 
 		let lock_file = std::fs::OpenOptions::new()
 			.create(true)
+			.truncate(false)
 			.write(true)
 			.open(tmp_dir.join(".lock"))
 			.map_err(|e| JavaError::Io(e.to_string()))?;

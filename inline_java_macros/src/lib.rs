@@ -882,6 +882,7 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 }
 
 #[proc_macro]
+#[allow(clippy::similar_names)]
 pub fn java(input: TokenStream) -> TokenStream {
 	let input2 = proc_macro2::TokenStream::from(input);
 
@@ -995,8 +996,8 @@ fn ct_java_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStr
 		&filename,
 		&java_class,
 		&full_class_name,
-		opts.javac_args,
-		opts.java_args,
+		opts.javac_args.as_deref(),
+		opts.java_args.as_deref(),
 	)?;
 	java_type.ct_java_tokens(bytes)
 }
@@ -1092,21 +1093,22 @@ fn qualify_class_name(class_name: &str, imports: &str) -> String {
 /// Compile (if needed) and run a Java class at *compile time*, returning raw
 /// stdout bytes.  Delegates to `inline_java_core::run_java` and maps
 /// `JavaError` to `String` for use as a `compile_error!` diagnostic.
+#[allow(clippy::similar_names)]
 fn compile_run_java_now(
 	class_name: &str,
 	filename: &str,
 	java_class: &str,
 	full_class_name: &str,
-	javac_raw: Option<String>,
-	java_raw: Option<String>,
+	javac_raw: Option<&str>,
+	java_raw: Option<&str>,
 ) -> Result<Vec<u8>, String> {
 	inline_java_core::run_java(
 		class_name,
 		filename,
 		java_class,
 		full_class_name,
-		javac_raw.as_deref().unwrap_or(""),
-		java_raw.as_deref().unwrap_or(""),
+		javac_raw.unwrap_or(""),
+		java_raw.unwrap_or(""),
 		&[],
 	)
 	.map_err(|e| e.to_string())
