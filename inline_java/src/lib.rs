@@ -1,6 +1,9 @@
 /// Re-export the proc macros so users only need to depend on this crate.
 pub use inline_java_macros::{ct_java, java};
 
+/// Re-exported for use by `java!`-generated code.
+pub use fd_lock;
+
 /// Expand shell variables in `raw` (with `INLINE_JAVA_CP` resolved to
 /// `inline_java_cp`), then split the result into individual arguments.
 /// Returns an empty vec if `raw` is empty.

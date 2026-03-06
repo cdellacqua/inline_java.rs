@@ -901,11 +901,15 @@ pub fn java(input: TokenStream) -> TokenStream {
 		java_type,
 	} = parsed;
 
-	// Unique class name derived from the source content.
+	// Unique class name derived from source content and compilation options.
+	// opts are included so that two call sites with the same body but different
+	// javac/java args get separate temp dirs (and separate .done sentinels).
 	let mut h = DefaultHasher::new();
 	imports.hash(&mut h);
 	outer.hash(&mut h);
 	body.hash(&mut h);
+	opts.javac_args.hash(&mut h);
+	opts.java_args.hash(&mut h);
 	let class_name = format!("InlineJava_{:016x}", h.finish());
 	let filename = format!("{class_name}.java");
 
@@ -946,30 +950,33 @@ pub fn java(input: TokenStream) -> TokenStream {
 
 	let generated = quote! {
 		(|| -> ::std::result::Result<_, ::inline_java::JavaError> {
-			// Temp dir: source-hash subdir + PID subdir.
-			// Same process → same dir (mutex below serialises write+compile).
-			// Different processes → different dirs (no cross-process races).
-			let _tmp_dir = ::std::env::temp_dir()
-				.join(#class_name)
-				.join(::std::process::id().to_string());
+			// Temp dir: deterministic by source hash, shared across processes.
+			let _tmp_dir = ::std::env::temp_dir().join(#class_name);
 			let _cp = _tmp_dir.to_string_lossy().into_owned();
 
 			// Expand $INLINE_JAVA_CP and other shell variables at runtime.
 			let _javac_extra = ::inline_java::expand_java_args(#javac_raw, &_cp);
 			let _java_extra  = ::inline_java::expand_java_args(#java_raw,  &_cp);
 
-			// Serialise write+compile: only one thread per call site compiles.
-			// A poisoned mutex is recovered so a later thread can retry after
-			// an earlier one panicked mid-compile.
-			static _COMPILED: ::std::sync::Mutex<bool> =
-				::std::sync::Mutex::new(false);
-			{
-				let mut _guard = _COMPILED.lock()
-					.unwrap_or_else(|e| e.into_inner());
-				if !*_guard {
-					::std::fs::create_dir_all(&_tmp_dir)
-						.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
+			// Fast path: already compiled in this process.
+			static _COMPILED: ::std::sync::atomic::AtomicBool =
+				::std::sync::atomic::AtomicBool::new(false);
+			if !_COMPILED.load(::std::sync::atomic::Ordering::Acquire) {
+				::std::fs::create_dir_all(&_tmp_dir)
+					.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
 
+				// Serialise write+compile across threads and processes via file lock.
+				// The lock is released automatically on drop (even on panic/crash).
+				let _lock_file = ::std::fs::OpenOptions::new()
+					.create(true).write(true)
+					.open(_tmp_dir.join(".lock"))
+					.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
+				let mut _lock = ::inline_java::fd_lock::RwLock::new(_lock_file);
+				let _guard = _lock.write()
+					.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
+
+				// Double-check: another process may have compiled while we waited.
+				if !_tmp_dir.join(".done").exists() {
 					let _src = _tmp_dir.join(#filename);
 					::std::fs::write(&_src, #java_class)
 						.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
@@ -987,8 +994,12 @@ pub fn java(input: TokenStream) -> TokenStream {
 							::std::string::String::from_utf8_lossy(&_javac_out.stderr).into_owned()
 						));
 					}
-					*_guard = true;
+
+					::std::fs::write(_tmp_dir.join(".done"), b"")
+						.map_err(|e| ::inline_java::JavaError::Io(e.to_string()))?;
 				}
+
+				_COMPILED.store(true, ::std::sync::atomic::Ordering::Release);
 			}
 
 			// Run phase.  The default `-cp $tmpdir` comes first; any `-cp`
@@ -1048,6 +1059,8 @@ fn ct_java_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStr
 	imports.hash(&mut h);
 	outer.hash(&mut h);
 	body.hash(&mut h);
+	opts.javac_args.hash(&mut h);
+	opts.java_args.hash(&mut h);
 	let class_name = format!("CtJava_{:016x}", h.finish());
 	let filename = format!("{class_name}.java");
 
@@ -1065,10 +1078,6 @@ fn ct_java_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStr
 	std::fs::create_dir_all(&tmp_dir)
 		.map_err(|e| format!("ct_java: failed to create temp dir: {e}"))?;
 
-	let src = tmp_dir.join(&filename);
-	std::fs::write(&src, &java_class)
-		.map_err(|e| format!("ct_java: failed to write .java source: {e}"))?;
-
 	let inline_java_cp = tmp_dir.to_string_lossy().into_owned();
 
 	let java_compiler_extra: Vec<String> = opts
@@ -1080,22 +1089,44 @@ fn ct_java_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStr
 		.map(|a| split_args(&shellexpand_with_cp(&a, &inline_java_cp)))
 		.unwrap_or_default();
 
-	// Compile phase.
-	let mut java_compiler_cmd = std::process::Command::new("javac");
-	for arg in &java_compiler_extra {
-		java_compiler_cmd.arg(arg);
-	}
-	let java_compiler_output = java_compiler_cmd
-		.arg("-d")
-		.arg(&tmp_dir)
-		.arg(&src)
-		.output()
-		.map_err(|e| format!("ct_java: could not invoke javac (is it on PATH?): {e}"))?;
-	if !java_compiler_output.status.success() {
-		return Err(format!(
-			"ct_java: javac failed:\n{}",
-			String::from_utf8_lossy(&java_compiler_output.stderr)
-		));
+	// Serialise write+compile across parallel proc-macro processes via file lock.
+	// The lock is released automatically on drop (even on panic/crash).
+	let lock_file = std::fs::OpenOptions::new()
+		.create(true)
+		.write(true)
+		.open(tmp_dir.join(".lock"))
+		.map_err(|e| format!("ct_java: failed to open lock file: {e}"))?;
+	let mut lock = fd_lock::RwLock::new(lock_file);
+	let _guard = lock
+		.write()
+		.map_err(|e| format!("ct_java: failed to acquire lock: {e}"))?;
+
+	// Skip compilation if a previous build already produced the .class files.
+	if !tmp_dir.join(".done").exists() {
+		let src = tmp_dir.join(&filename);
+		std::fs::write(&src, &java_class)
+			.map_err(|e| format!("ct_java: failed to write .java source: {e}"))?;
+
+		// Compile phase.
+		let mut java_compiler_cmd = std::process::Command::new("javac");
+		for arg in &java_compiler_extra {
+			java_compiler_cmd.arg(arg);
+		}
+		let java_compiler_output = java_compiler_cmd
+			.arg("-d")
+			.arg(&tmp_dir)
+			.arg(&src)
+			.output()
+			.map_err(|e| format!("ct_java: could not invoke javac (is it on PATH?): {e}"))?;
+		if !java_compiler_output.status.success() {
+			return Err(format!(
+				"ct_java: javac failed:\n{}",
+				String::from_utf8_lossy(&java_compiler_output.stderr)
+			));
+		}
+
+		std::fs::write(tmp_dir.join(".done"), b"")
+			.map_err(|e| format!("ct_java: failed to write .done sentinel: {e}"))?;
 	}
 
 	// Run phase.  The default `-cp $tmpdir` comes first; any `-cp` supplied
