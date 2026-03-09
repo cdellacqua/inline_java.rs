@@ -7,3 +7,10 @@ members = [
   "inline_java",
   "inline_java_demo",
 ]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Carlo Dell'Acqua <carlo.dellacqua97@gmail.com>"]
+repository = "https://github.com/cdellacqua/inline_java.rs"

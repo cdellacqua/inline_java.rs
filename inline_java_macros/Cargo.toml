@@ -1,13 +1,17 @@
 [package]
 name = "inline_java_macros"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Proc-macro implementation for inline_java — not intended for direct use"
+readme = "README.md"
 
 [lib]
 proc-macro = true
 
 [dependencies]
-inline_java_core = { path = "../inline_java_core" }
+inline_java_core = { version = "0.1.0", path = "../inline_java_core" }
 proc-macro2 = { version = "1.0.106", features = ["span-locations"] }
 quote = "1.0.44"
 litrs = { version = "1.0.0", features = ["proc-macro2"] }
