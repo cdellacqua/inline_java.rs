@@ -1,5 +1,6 @@
 use inline_java::{ct_java, java, java_fn};
 
+#[allow(clippy::too_many_lines)]
 fn main() {
 	// runtime, no input
 	let x: i32 = java! {

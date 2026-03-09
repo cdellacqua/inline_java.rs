@@ -23,7 +23,7 @@
 //! Encoding per type:
 //! - `Boxed(String)` at top level: raw UTF-8 (no length prefix)
 //! - `Boxed(String)` inside a container: 4-byte BE length + UTF-8 bytes
-//! - `Primitive` / `Boxed(non-String)`: fixed-width big-endian bytes via DataOutputStream
+//! - `Primitive` / `Boxed(non-String)`: fixed-width big-endian bytes via `DataOutputStream`
 //! - `Array(T)` / `List(T)`: 4-byte BE count + N × encode(T)
 //! - `Optional(T)`: 1-byte tag (0=absent, 1=present) + encode(T) if present
 //!
@@ -53,7 +53,7 @@ use std::str::FromStr;
 // ── ScalarEnc ────────────────────────────────────────────────────────────────
 
 /// Internal wire-encoding kind shared by `PrimitiveType` and `BoxedType`.
-/// Determines byte layout, DataOutputStream method, and Rust decode logic.
+/// Determines byte layout, `DataOutputStream` method, and Rust decode logic.
 #[derive(Clone, Copy, PartialEq)]
 enum ScalarEnc {
 	Byte,
@@ -251,7 +251,7 @@ impl BoxedType {
 		}
 	}
 
-	/// Read from DataInputStream — always uses primitive read ops; Java auto-boxes.
+	/// Read from `DataInputStream` — always uses primitive read ops; Java auto-boxes.
 	fn java_dis_read(self, param_name: &str) -> String {
 		match self {
 			Self::Byte => format!("byte {param_name} = _dis.readByte();"),
@@ -462,6 +462,7 @@ impl JavaType {
 	/// `run()`'s return value to stdout.  `params` lists the parameters declared
 	/// in `run(...)` so the generated `main` can read them from stdin and forward
 	/// them to `run`.
+	#[allow(clippy::too_many_lines)]
 	fn java_main(&self, params: &[(JavaType, String)]) -> String {
 		// Build DataInputStream setup + parameter reads (only if there are params).
 		let param_reads = if params.is_empty() {
@@ -1232,19 +1233,14 @@ fn parse_run_return_type(tts: &[TokenTree]) -> Result<(JavaType, usize, usize), 
 			continue;
 		}
 
-		match parse_java_type(&tts[type_start..]) {
-			Ok((java_type, consumed)) => {
-				let run_idx = type_start + consumed;
-				if matches!(tts.get(run_idx), Some(TokenTree::Ident(id)) if id == "run") {
-					return Ok((java_type, start, run_idx));
-				}
-				// consumed tokens didn't lead to `run` — continue scanning
+		if let Ok((java_type, consumed)) = parse_java_type(&tts[type_start..]) {
+			let run_idx = type_start + consumed;
+			if matches!(tts.get(run_idx), Some(TokenTree::Ident(id)) if id == "run") {
+				return Ok((java_type, start, run_idx));
 			}
-			Err(_) => {
-				// Not a valid type here — continue scanning
-				continue;
-			}
+			// consumed tokens didn't lead to `run` — continue scanning
 		}
+		// Not a valid type here — continue scanning
 	}
 	Err("inline_java: could not find `static <type> run()` in Java body".to_string())
 }
@@ -1449,6 +1445,7 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 /// used by both `java!` and `java_fn!`.  The caller decides whether to emit
 /// `__java_runner()` (immediate call, `java!`) or `__java_runner` (return
 /// the function, `java_fn!`).
+#[allow(clippy::similar_names)]
 fn make_runner_fn(
 	parsed: ParsedJava,
 	opts: JavaOpts,

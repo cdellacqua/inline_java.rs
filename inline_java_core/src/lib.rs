@@ -129,8 +129,7 @@ fn normalize_opts(opts: &str) -> String {
 		.map(|tok| {
 			if std::path::Path::new(tok).is_relative() {
 				std::path::absolute(tok)
-					.map(|p| p.to_string_lossy().into_owned())
-					.unwrap_or_else(|_| tok.to_owned())
+					.map_or_else(|_| tok.to_owned(), |p| p.to_string_lossy().into_owned())
 			} else {
 				tok.to_owned()
 			}
@@ -155,6 +154,7 @@ fn normalize_opts(opts: &str) -> String {
 /// and two invocations from different working directories produce different
 /// keys only when they actually refer to different directories.
 #[must_use]
+#[allow(clippy::similar_names)]
 pub fn cache_dir(
 	class_name: &str,
 	java_class: &str,
@@ -277,15 +277,13 @@ pub fn run_java(
 		.map_err(|e| JavaError::Io(e.to_string()))?;
 
 	// Write stdin bytes then drop the handle to signal EOF.
-	if !stdin_bytes.is_empty() {
-		if let Some(mut stdin_handle) = child.stdin.take() {
-			stdin_handle
-				.write_all(stdin_bytes)
-				.map_err(|e| JavaError::Io(e.to_string()))?;
-		}
-	} else {
+	if stdin_bytes.is_empty() {
 		// Drop stdin handle even when empty so Java doesn't block waiting.
 		drop(child.stdin.take());
+	} else if let Some(mut stdin_handle) = child.stdin.take() {
+		stdin_handle
+			.write_all(stdin_bytes)
+			.map_err(|e| JavaError::Io(e.to_string()))?;
 	}
 
 	let out = child
