@@ -213,3 +213,11 @@ fn parity_with_java() {
 | `inline_java_macros` | Proc-macro implementation (`java!`, `java_fn!`, `ct_java!`) |
 | `inline_java_core`   | Runtime helpers (`run_java`, `JavaError`)                   |
 | `inline_java_demo`   | Demo binary                                                 |
+
+---
+
+<!-- TODO: move integration tests from `inline_java_demo/tests/` to `inline_java/tests/` so they live in the published crate -->
+
+<!-- TODO: verify Java 8+ compatibility before releasing — test with OpenJDK 8 and update the Prerequisites section accordingly -->
+
+<!-- TODO: consider replacing the doc-comment text-walls in `inline_java/src/lib.rs` and `inline_java_core/src/lib.rs` with `#[doc = include_str!("../../README.md")]` (and a crate-specific variant for the support crates) to keep docs in sync with the README automatically -->
