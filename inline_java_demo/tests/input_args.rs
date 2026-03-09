@@ -1,19 +1,13 @@
 // Tests for passing complex types *into* java_fn! as input parameters.
 // Each method echoes its argument back so the test verifies the full
 // serialise → Java → deserialise round-trip.
-//
-// All tests in this file are currently Red (implementation not yet complete).
 
 use inline_java::java_fn;
 
 // List<Optional<String[]>> as input → Vec<Option<Vec<String>>>
 #[test]
 fn java_fn_arg_list_of_optional_string_array() {
-	let input: Vec<Option<Vec<&str>>> = vec![
-		Some(vec!["a", "b"]),
-		None,
-		Some(vec!["c"]),
-	];
+	let input: &[Option<&[&str]>] = &[Some(&["a", "b"]), None, Some(&["c"])];
 	let v: Vec<Option<Vec<String>>> = java_fn! {
 		import java.util.List;
 		import java.util.Optional;
@@ -37,7 +31,7 @@ fn java_fn_arg_optional_list_integer_present() {
 		static Optional<List<Integer>> run(Optional<List<Integer>> v) {
 			return v;
 		}
-	}(Some(vec![1i32, 2, 3])).unwrap();
+	}(Some(&[1i32, 2, 3])).unwrap();
 	assert_eq!(v, Some(vec![1, 2, 3]));
 }
 
@@ -50,7 +44,7 @@ fn java_fn_arg_optional_list_integer_absent() {
 		static Optional<List<Integer>> run(Optional<List<Integer>> v) {
 			return v;
 		}
-	}(None::<Vec<i32>>).unwrap();
+	}(None::<&[i32]>).unwrap();
 	assert_eq!(v, None);
 }
 
@@ -63,7 +57,7 @@ fn java_fn_arg_optional_list_of_optional_integer_present() {
 		static Optional<List<Optional<Integer>>> run(Optional<List<Optional<Integer>>> v) {
 			return v;
 		}
-	}(Some(vec![Some(1i32), None, Some(3)])).unwrap();
+	}(Some(&[Some(1i32), None, Some(3i32)])).unwrap();
 	assert_eq!(v, Some(vec![Some(1), None, Some(3)]));
 }
 
@@ -76,7 +70,7 @@ fn java_fn_arg_optional_list_of_optional_integer_absent() {
 		static Optional<List<Optional<Integer>>> run(Optional<List<Optional<Integer>>> v) {
 			return v;
 		}
-	}(None::<Vec<Option<i32>>>).unwrap();
+	}(None::<&[Option<i32>]>).unwrap();
 	assert_eq!(v, None);
 }
 
@@ -89,7 +83,7 @@ fn java_fn_arg_optional_list_of_optional_integer_array_present() {
 		static Optional<List<Optional<Integer[]>>> run(Optional<List<Optional<Integer[]>>> v) {
 			return v;
 		}
-	}(Some(vec![Some(vec![1i32, 2]), None, Some(vec![3, 4, 5])])).unwrap();
+	}(Some(&[Some(&[1i32, 2] as &[_]), None, Some(&[3i32, 4, 5] as &[_])])).unwrap();
 	assert_eq!(v, Some(vec![Some(vec![1, 2]), None, Some(vec![3, 4, 5])]));
 }
 
@@ -102,17 +96,17 @@ fn java_fn_arg_optional_list_of_optional_integer_array_absent() {
 		static Optional<List<Optional<Integer[]>>> run(Optional<List<Optional<Integer[]>>> v) {
 			return v;
 		}
-	}(None::<Vec<Option<Vec<i32>>>>).unwrap();
+	}(None::<&[Option<&[i32]>]>).unwrap();
 	assert_eq!(v, None);
 }
 
 // Optional<List<Optional<String[][]>>> as input → Option<Vec<Option<Vec<Vec<String>>>>> (present)
 #[test]
 fn java_fn_arg_optional_list_of_optional_string_2d_array_present() {
-	let input: Option<Vec<Option<Vec<Vec<&str>>>>> = Some(vec![
-		Some(vec![vec!["a", "b"], vec!["c"]]),
-		None,
-	]);
+	let a: &[&str] = &["a", "b"];
+	let b: &[&str] = &["c"];
+	let row: &[&[&str]] = &[a, b];
+	let input: Option<&[Option<&[&[&str]]>]> = Some(&[Some(row), None]);
 	let v: Option<Vec<Option<Vec<Vec<String>>>>> = java_fn! {
 		import java.util.List;
 		import java.util.Optional;
@@ -138,6 +132,6 @@ fn java_fn_arg_optional_list_of_optional_string_2d_array_absent() {
 		static Optional<List<Optional<String[][]>>> run(Optional<List<Optional<String[][]>>> v) {
 			return v;
 		}
-	}(None::<Vec<Option<Vec<Vec<&str>>>>>).unwrap();
+	}(None::<&[Option<&[&[&str]]>]>).unwrap();
 	assert_eq!(v, None);
 }

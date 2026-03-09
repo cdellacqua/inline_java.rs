@@ -321,7 +321,7 @@ impl JavaType {
 	}
 
 	/// Returns the Rust parameter type token stream.
-	/// `Boxed(String)` leaf → `&str`; `Array`/`List` → `Vec<T>` (Fix A).
+	/// `Boxed(String)` leaf → `&str`; `Array`/`List` → `&[T]` (slice reference).
 	fn rust_param_type_ts(&self) -> proc_macro2::TokenStream {
 		match self {
 			Self::Primitive(p) => p.rust_type_ts(),
@@ -329,7 +329,7 @@ impl JavaType {
 			Self::Boxed(b) => b.rust_type_ts(),
 			Self::Array(inner) | Self::List(inner) => {
 				let inner_ts = inner.rust_param_type_ts();
-				quote! { ::std::vec::Vec<#inner_ts> }
+				quote! { &[#inner_ts] }
 			}
 			Self::Optional(inner) => {
 				let inner_ts = inner.rust_param_type_ts();
@@ -352,7 +352,7 @@ impl JavaType {
 				quote! {
 					{
 						_stdin_bytes.extend_from_slice(&(#param_ident.len() as i32).to_be_bytes());
-						for #item_var in #param_ident {
+						for &#item_var in #param_ident {
 							#inner_ser
 						}
 					}
