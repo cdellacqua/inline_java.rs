@@ -20,12 +20,16 @@ fn java_runtime_list_of_optional_string_array() {
 				Optional.of(new String[]{"c"})
 			);
 		}
-	}.unwrap();
-	assert_eq!(v, vec![
-		Some(vec!["a".to_string(), "b".to_string()]),
-		None,
-		Some(vec!["c".to_string()]),
-	]);
+	}
+	.unwrap();
+	assert_eq!(
+		v,
+		vec![
+			Some(vec!["a".to_string(), "b".to_string()]),
+			None,
+			Some(vec!["c".to_string()]),
+		]
+	);
 }
 
 // Optional<List<Integer>> → Option<Vec<i32>>
@@ -38,7 +42,8 @@ fn java_runtime_optional_list_integer_present() {
 		static Optional<List<Integer>> run() {
 			return Optional.of(Arrays.asList(1, 2, 3));
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, Some(vec![1, 2, 3]));
 }
 
@@ -50,7 +55,8 @@ fn java_runtime_optional_list_integer_absent() {
 		static Optional<List<Integer>> run() {
 			return Optional.empty();
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, None);
 }
 
@@ -68,7 +74,8 @@ fn java_runtime_optional_list_of_optional_integer_present() {
 				Optional.of(3)
 			));
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, Some(vec![Some(1), None, Some(3)]));
 }
 
@@ -80,7 +87,8 @@ fn java_runtime_optional_list_of_optional_integer_absent() {
 		static Optional<List<Optional<Integer>>> run() {
 			return Optional.empty();
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, None);
 }
 
@@ -98,7 +106,8 @@ fn java_runtime_optional_list_of_optional_integer_array_present() {
 				Optional.of(new Integer[]{3, 4, 5})
 			));
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, Some(vec![Some(vec![1, 2]), None, Some(vec![3, 4, 5])]));
 }
 
@@ -110,7 +119,8 @@ fn java_runtime_optional_list_of_optional_integer_array_absent() {
 		static Optional<List<Optional<Integer[]>>> run() {
 			return Optional.empty();
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, None);
 }
 
@@ -127,14 +137,18 @@ fn java_runtime_optional_list_of_optional_string_2d_array_present() {
 				Optional.empty()
 			));
 		}
-	}.unwrap();
-	assert_eq!(v, Some(vec![
+	}
+	.unwrap();
+	assert_eq!(
+		v,
 		Some(vec![
-			vec!["a".to_string(), "b".to_string()],
-			vec!["c".to_string()],
-		]),
-		None,
-	]));
+			Some(vec![
+				vec!["a".to_string(), "b".to_string()],
+				vec!["c".to_string()],
+			]),
+			None,
+		])
+	);
 }
 
 #[test]
@@ -145,6 +159,7 @@ fn java_runtime_optional_list_of_optional_string_2d_array_absent() {
 		static Optional<List<Optional<String[][]>>> run() {
 			return Optional.empty();
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, None);
 }

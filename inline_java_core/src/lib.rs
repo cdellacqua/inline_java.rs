@@ -299,7 +299,10 @@ mod tests {
 	fn cache_dir_idempotent() {
 		let a = cache_dir("MyClass", "class body", "-cp /usr/lib", "-verbose");
 		let b = cache_dir("MyClass", "class body", "-cp /usr/lib", "-verbose");
-		assert_eq!(a, b, "cache_dir must return the same path for identical args");
+		assert_eq!(
+			a, b,
+			"cache_dir must return the same path for identical args"
+		);
 	}
 
 	// -----------------------------------------------------------------------
