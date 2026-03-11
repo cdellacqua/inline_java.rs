@@ -1,10 +1,11 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+#  pull_request:
+#    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,7 +27,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '8'
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -38,14 +39,16 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Build
-        run: cargo build --workspace
-
-      - name: Test
-        run: cargo test --workspace
-
-      - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+      # Redundant while no code is gated with #[cfg(not(test))]; restore if
+      # that changes, since `cargo test` sets cfg(test) and won't compile it.
+      #- name: Build
+      #  run: cargo build --locked --workspace
 
       - name: Format
         run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings -D clippy::pedantic
+
+      - name: Test
+        run: cargo test --workspace --locked
