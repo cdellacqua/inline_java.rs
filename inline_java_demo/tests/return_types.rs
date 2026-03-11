@@ -10,7 +10,8 @@ fn java_runtime_int_array() {
 		static int[] run() {
 			return new int[]{1, 2, 3, 4, 5};
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, vec![1i32, 2, 3, 4, 5]);
 }
 
@@ -22,7 +23,8 @@ fn java_runtime_double_array() {
 		static double[] run() {
 			return new double[]{1.5, 2.5, 3.5};
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, vec![1.5f64, 2.5, 3.5]);
 }
 
@@ -34,7 +36,8 @@ fn java_runtime_boolean_array() {
 		static boolean[] run() {
 			return new boolean[]{true, false, true};
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, vec![true, false, true]);
 }
 
@@ -46,7 +49,8 @@ fn java_runtime_string_array() {
 		static String[] run() {
 			return new String[]{"hello", "world"};
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, vec!["hello".to_string(), "world".to_string()]);
 }
 
@@ -58,7 +62,8 @@ fn java_runtime_empty_array() {
 		static int[] run() {
 			return new int[]{};
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert!(v.is_empty());
 }
 
@@ -74,7 +79,8 @@ fn java_runtime_list_integer() {
 		static List<Integer> run() {
 			return Arrays.asList(10, 20, 30);
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, vec![10i32, 20, 30]);
 }
 
@@ -87,8 +93,12 @@ fn java_runtime_list_string() {
 		static java.util.List<String> run() {
 			return Arrays.asList("foo", "bar", "baz");
 		}
-	}.unwrap();
-	assert_eq!(v, vec!["foo".to_string(), "bar".to_string(), "baz".to_string()]);
+	}
+	.unwrap();
+	assert_eq!(
+		v,
+		vec!["foo".to_string(), "bar".to_string(), "baz".to_string()]
+	);
 }
 
 // ── OOP ───────────────────────────────────────────────────────────────────────
@@ -109,7 +119,8 @@ fn java_runtime_abstract_class_override() {
 		static String run() {
 			return new Dog().sound();
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(sound, "woof");
 }
 
@@ -127,7 +138,8 @@ fn java_runtime_list_of_list_integer() {
 			List<Integer> b = Arrays.asList(4, 5, 6);
 			return Arrays.asList(a, b);
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, vec![vec![1, 2, 3], vec![4, 5, 6]]);
 }
 
@@ -141,7 +153,8 @@ fn java_runtime_optional_list_string_present() {
 		static Optional<List<String>> run() {
 			return Optional.of(Arrays.asList("hello", "world"));
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, Some(vec!["hello".to_string(), "world".to_string()]));
 }
 
@@ -153,7 +166,8 @@ fn java_runtime_optional_list_string_absent() {
 		static Optional<List<String>> run() {
 			return Optional.empty();
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, None);
 }
 
@@ -167,7 +181,8 @@ fn java_runtime_list_of_optional_integer() {
 		static List<Optional<Integer>> run() {
 			return Arrays.asList(Optional.of(10), Optional.empty(), Optional.of(30));
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, vec![Some(10), None, Some(30)]);
 }
 
@@ -179,7 +194,8 @@ fn java_runtime_optional_optional_boolean_present() {
 		static Optional<Optional<Boolean>> run() {
 			return Optional.of(Optional.of(true));
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, Some(Some(true)));
 }
 
@@ -190,7 +206,8 @@ fn java_runtime_optional_optional_boolean_outer_absent() {
 		static Optional<Optional<Boolean>> run() {
 			return Optional.empty();
 		}
-	}.unwrap();
+	}
+	.unwrap();
 	assert_eq!(v, None);
 }
 
@@ -205,11 +222,15 @@ fn java_runtime_list_of_list_string() {
 			List<String> b = Arrays.asList("baz");
 			return Arrays.asList(a, b);
 		}
-	}.unwrap();
-	assert_eq!(v, vec![
-		vec!["foo".to_string(), "bar".to_string()],
-		vec!["baz".to_string()],
-	]);
+	}
+	.unwrap();
+	assert_eq!(
+		v,
+		vec![
+			vec!["foo".to_string(), "bar".to_string()],
+			vec!["baz".to_string()],
+		]
+	);
 }
 
 // ── ct_java! return types ─────────────────────────────────────────────────────
@@ -280,7 +301,10 @@ fn java_runtime_null_string() {
 			return null;
 		}
 	};
-	assert!(result.is_err(), "expected Err for null String return, got {result:?}");
+	assert!(
+		result.is_err(),
+		"expected Err for null String return, got {result:?}"
+	);
 }
 
 #[test]
@@ -291,5 +315,8 @@ fn java_runtime_null_string_array() {
 			return null;
 		}
 	};
-	assert!(result.is_err(), "expected Err for null String[] return, got {result:?}");
+	assert!(
+		result.is_err(),
+		"expected Err for null String[] return, got {result:?}"
+	);
 }

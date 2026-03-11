@@ -341,7 +341,11 @@ impl JavaType {
 	/// Generates Rust code to serialize a parameter value into `_stdin_bytes`.
 	/// `param_ident` is the Rust identifier holding the value.
 	/// `depth` is used to generate unique variable names for nested loops.
-	fn rust_ser_ts(&self, param_ident: &proc_macro2::TokenStream, depth: usize) -> proc_macro2::TokenStream {
+	fn rust_ser_ts(
+		&self,
+		param_ident: &proc_macro2::TokenStream,
+		depth: usize,
+	) -> proc_macro2::TokenStream {
 		match self {
 			Self::Primitive(p) => scalar_enc_ser_ts(p.enc(), param_ident),
 			Self::Boxed(b) => scalar_enc_ser_ts(b.enc(), param_ident),
@@ -635,7 +639,10 @@ impl JavaType {
 // ── Scalar encoding helpers ───────────────────────────────────────────────────
 
 /// Generate Rust code to serialise a scalar value into `_stdin_bytes`.
-fn scalar_enc_ser_ts(enc: ScalarEnc, param_ident: &proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+fn scalar_enc_ser_ts(
+	enc: ScalarEnc,
+	param_ident: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
 	match enc {
 		ScalarEnc::Byte => quote! {
 			_stdin_bytes.extend_from_slice(&(#param_ident as i8).to_be_bytes());
@@ -1070,18 +1077,15 @@ fn parse_java_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String> {
 				"List" | "Optional" => {
 					// Expect `<` inner_type `>`
 					if !matches!(tts.get(1), Some(TokenTree::Punct(p)) if p.as_char() == '<') {
-						return Err(format!(
-							"inline_java: expected `<` after `{name}`"
-						));
+						return Err(format!("inline_java: expected `<` after `{name}`"));
 					}
 					// Parse inner type recursively starting at index 2
 					let (inner_ty, inner_consumed) = parse_java_type_inner(&tts[2..])?;
 					// After inner type, we need `>`
 					let close_idx = 2 + inner_consumed;
-					if !matches!(tts.get(close_idx), Some(TokenTree::Punct(p)) if p.as_char() == '>') {
-						return Err(format!(
-							"inline_java: expected `>` to close `{name}<...>`"
-						));
+					if !matches!(tts.get(close_idx), Some(TokenTree::Punct(p)) if p.as_char() == '>')
+					{
+						return Err(format!("inline_java: expected `>` to close `{name}<...>`"));
 					}
 					let total_consumed = offset + close_idx + 1;
 					if name == "List" {
@@ -1128,7 +1132,9 @@ fn parse_java_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String> {
 /// Also accepts primitive names (`int`, `byte`, …) and maps them to boxed equivalents.
 fn parse_java_type_inner(tts: &[TokenTree]) -> Result<(JavaType, usize), String> {
 	if tts.is_empty() {
-		return Err("inline_java: unexpected end of tokens while parsing Java type argument".to_string());
+		return Err(
+			"inline_java: unexpected end of tokens while parsing Java type argument".to_string(),
+		);
 	}
 
 	// Handle `java.util.` qualified prefix
@@ -1149,16 +1155,13 @@ fn parse_java_type_inner(tts: &[TokenTree]) -> Result<(JavaType, usize), String>
 				"List" | "Optional" => {
 					// Recursive container inside generics
 					if !matches!(tts.get(1), Some(TokenTree::Punct(p)) if p.as_char() == '<') {
-						return Err(format!(
-							"inline_java: expected `<` after `{name}`"
-						));
+						return Err(format!("inline_java: expected `<` after `{name}`"));
 					}
 					let (inner_ty, inner_consumed) = parse_java_type_inner(&tts[2..])?;
 					let close_idx = 2 + inner_consumed;
-					if !matches!(tts.get(close_idx), Some(TokenTree::Punct(p)) if p.as_char() == '>') {
-						return Err(format!(
-							"inline_java: expected `>` to close `{name}<...>`"
-						));
+					if !matches!(tts.get(close_idx), Some(TokenTree::Punct(p)) if p.as_char() == '>')
+					{
+						return Err(format!("inline_java: expected `>` to close `{name}<...>`"));
 					}
 					let total_consumed = offset + close_idx + 1;
 					if name == "List" {
@@ -1376,8 +1379,7 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 	let body_start = first_body_idx.unwrap_or(tts.len());
 
 	// Parse return type and run index from body tokens.
-	let (java_type, run_rel_idx, run_rel_run_idx) =
-		parse_run_return_type(&tts[body_start..])?;
+	let (java_type, run_rel_idx, run_rel_run_idx) = parse_run_return_type(&tts[body_start..])?;
 	let run_abs_idx = body_start + run_rel_idx;
 	let run_token_abs_idx = body_start + run_rel_run_idx;
 
@@ -1446,11 +1448,7 @@ fn parse_java_source(stream: proc_macro2::TokenStream) -> Result<ParsedJava, Str
 /// `__java_runner()` (immediate call, `java!`) or `__java_runner` (return
 /// the function, `java_fn!`).
 #[allow(clippy::similar_names)]
-fn make_runner_fn(
-	parsed: ParsedJava,
-	opts: JavaOpts,
-	prefix: &str,
-) -> proc_macro2::TokenStream {
+fn make_runner_fn(parsed: ParsedJava, opts: JavaOpts, prefix: &str) -> proc_macro2::TokenStream {
 	let ParsedJava {
 		imports,
 		outer,
@@ -1749,7 +1747,6 @@ struct JavaOpts {
 	java_args: Option<String>,
 }
 
-
 /// Consume leading `javac = "…"` / `java = "…"` option pairs (comma-separated,
 /// trailing comma optional) and return the remaining token stream as the Java
 /// body.  Unrecognised leading tokens are left untouched.
@@ -1809,7 +1806,13 @@ fn try_parse_opt(tts: &[TokenTree]) -> Option<(String, String, usize)> {
 
 /// Compute a deterministic class name by hashing the source and options.
 /// `prefix` distinguishes runtime ("`InlineJava`") from compile-time ("`CtJava`").
-fn make_class_name(prefix: &str, imports: &str, outer: &str, body: &str, opts: &JavaOpts) -> String {
+fn make_class_name(
+	prefix: &str,
+	imports: &str,
+	outer: &str,
+	body: &str,
+	opts: &JavaOpts,
+) -> String {
 	let mut h = DefaultHasher::new();
 	imports.hash(&mut h);
 	outer.hash(&mut h);
@@ -1860,9 +1863,7 @@ fn format_java_class(
 	body: &str,
 	main_method: &str,
 ) -> String {
-	format!(
-		"{imports}\n{outer}\npublic class {class_name} {{\n\n{body}\n\n{main_method}\n}}\n"
-	)
+	format!("{imports}\n{outer}\npublic class {class_name} {{\n\n{body}\n\n{main_method}\n}}\n")
 }
 
 // Package name extraction
