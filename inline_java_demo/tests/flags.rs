@@ -1,4 +1,26 @@
 use inline_java::{ct_java, java};
+use std::process::Command;
+
+fn build_demo_jar(jar_path: &str) {
+	let manifest_dir = env!("CARGO_MANIFEST_DIR");
+	let classes_dir = format!("{jar_path}.d");
+	std::fs::create_dir_all(&classes_dir).expect("create classes dir");
+	let status = Command::new("javac")
+		.args([
+			"-d",
+			&classes_dir,
+			&format!("{manifest_dir}/com/example/demo/Greetings.java"),
+			&format!("{manifest_dir}/com/example/demo/HelloWorld.java"),
+		])
+		.status()
+		.expect("javac");
+	assert!(status.success(), "javac failed building demo jar");
+	let status = Command::new("jar")
+		.args(["cf", jar_path, "-C", &classes_dir, "."])
+		.status()
+		.expect("jar");
+	assert!(status.success(), "jar failed building demo jar");
+}
 
 // java = "..." : single system property passed to the JVM
 
@@ -41,9 +63,10 @@ fn java_runtime_multiple_java_args() {
 
 #[test]
 fn java_runtime_javac_classpath_jar() {
+	build_demo_jar("/tmp/inline_java_flags_cp_jar/demo.jar");
 	let val: Result<String, _> = java! {
-		javac = "-cp \"demo.jar\"",
-		java = "-cp demo.jar",
+		javac = "-cp \"/tmp/inline_java_flags_cp_jar/demo.jar\"",
+		java = "-cp /tmp/inline_java_flags_cp_jar/demo.jar",
 		import com.example.demo.*;
 		static String run() {
 			return new HelloWorld().greet();
@@ -54,9 +77,10 @@ fn java_runtime_javac_classpath_jar() {
 
 #[test]
 fn java_runtime_javac_classpath_jar_long_arg_name() {
+	build_demo_jar("/tmp/inline_java_flags_cp_long_jar/demo.jar");
 	let val: Result<String, _> = java! {
-		javac = "-classpath \"demo.jar\"",
-		java = "-classpath demo.jar",
+		javac = "-classpath \"/tmp/inline_java_flags_cp_long_jar/demo.jar\"",
+		java = "-classpath /tmp/inline_java_flags_cp_long_jar/demo.jar",
 		import com.example.demo.*;
 		static String run() {
 			return new HelloWorld().greet();

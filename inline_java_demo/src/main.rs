@@ -1,4 +1,26 @@
 use inline_java::{ct_java, java, java_fn};
+use std::process::Command;
+
+fn build_demo_jar(jar_path: &str) {
+	let manifest_dir = env!("CARGO_MANIFEST_DIR");
+	let classes_dir = format!("{jar_path}.d");
+	std::fs::create_dir_all(&classes_dir).expect("create classes dir");
+	let status = Command::new("javac")
+		.args([
+			"-d",
+			&classes_dir,
+			&format!("{manifest_dir}/com/example/demo/Greetings.java"),
+			&format!("{manifest_dir}/com/example/demo/HelloWorld.java"),
+		])
+		.status()
+		.expect("javac");
+	assert!(status.success(), "javac failed building demo jar");
+	let status = Command::new("jar")
+		.args(["cf", jar_path, "-C", &classes_dir, "."])
+		.status()
+		.expect("jar");
+	assert!(status.success(), "jar failed building demo jar");
+}
 
 #[allow(clippy::too_many_lines)]
 fn main() {
@@ -48,9 +70,10 @@ fn main() {
 	.unwrap();
 	println!("{imports}");
 
+	build_demo_jar("/tmp/inline_java_demo_jar/demo.jar");
 	let imports_jar: String = java! {
-		javac = "-classpath ./demo.jar",
-		java = "-classpath ./demo.jar",
+		javac = "-classpath /tmp/inline_java_demo_jar/demo.jar",
+		java = "-classpath /tmp/inline_java_demo_jar/demo.jar",
 		import com.example.demo.*;
 
 		static String run() {
