@@ -135,7 +135,7 @@ fn ct_java_java_arg() {
 // ct_java! with javac = "..."
 
 const CT_JAVAC_SOURCEPATH: &str = ct_java! {
-	javac = "-sourcepath ./inline_java_demo",
+	javac = "-sourcepath ./inline_java",
 	import com.example.demo.*;
 	static String run() {
 		return new HelloWorld().greet();
