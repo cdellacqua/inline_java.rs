@@ -1,4 +1,4 @@
-# inline_java
+# inline java
 
 Embed Java directly in Rust — evaluated at program runtime (`java!`, `java_fn!`) or at
 compile time (`ct_java!`).
@@ -20,7 +20,7 @@ inline_java = "0.1.0"
 Compiles and runs Java each time the surrounding Rust code executes.  Expands
 to `Result<T, inline_java::JavaError>`.
 
-```rust
+```rust,no_run
 use inline_java::java;
 
 // No type annotation needed — the macro infers `i32` from `static int run()`
@@ -37,7 +37,7 @@ Like `java!`, but `run(...)` may declare parameters.  Expands to a Rust
 function value `fn(P1, P2, …) -> Result<T, JavaError>`.  Parameters are
 serialised by Rust and piped to the Java process over stdin.
 
-```rust
+```rust,no_run
 use inline_java::java_fn;
 
 // Single parameter — return type inferred from `static int run()`
@@ -70,7 +70,7 @@ Runs Java during `rustc` macro expansion and splices the result as a Rust
 literal at the call site.  No parameters are allowed (values must be
 compile-time constants).
 
-```rust
+```rust,no_run
 use inline_java::ct_java;
 
 const PI: f64 = ct_java! {
@@ -133,7 +133,7 @@ commas:
 - `javac = "<args>"` — extra arguments for `javac` (shell-quoted).
 - `java  = "<args>"` — extra arguments for `java` (shell-quoted).
 
-```rust
+```rust,no_run
 use inline_java::java;
 
 let result: String = java! {
@@ -151,7 +151,7 @@ let result: String = java! {
 Use `import` or `package` directives together with `javac = "-sourcepath <path>"`
 (or `-classpath`) to call into your own Java code:
 
-```rust
+```rust,no_run
 // import style
 let s: String = java! {
     javac = "-sourcepath .",
@@ -181,7 +181,7 @@ migrations**.  The typical workflow is:
 3. Use `java_fn!` to call the original Java with the same inputs and assert
    that both implementations produce identical outputs.
 
-```rust
+```rust,no_run
 use inline_java::java_fn;
 
 fn my_rust_impl(n: i32) -> i32 {
@@ -213,11 +213,3 @@ fn parity_with_java() {
 | `inline_java_macros` | Proc-macro implementation (`java!`, `java_fn!`, `ct_java!`) |
 | `inline_java_core`   | Runtime helpers (`run_java`, `JavaError`)                   |
 | `inline_java_demo`   | Demo binary                                                 |
-
----
-
-<!-- TODO: move integration tests from `inline_java_demo/tests/` to `inline_java/tests/` so they live in the published crate -->
-
-<!-- TODO: verify Java 8+ compatibility before releasing — test with OpenJDK 8 and update the Prerequisites section accordingly -->
-
-<!-- TODO: consider replacing the doc-comment text-walls in `inline_java/src/lib.rs` and `inline_java_core/src/lib.rs` with `#[doc = include_str!("../../README.md")]` (and a crate-specific variant for the support crates) to keep docs in sync with the README automatically -->
