@@ -1,0 +1,19 @@
+[workspace]
+
+[[package]]
+name = "inline_java_demo"
+publish = false
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "inline_java_core"
+changelog_update = false
+
+[[package]]
+name = "inline_java_macros"
+changelog_update = false
+
+[[package]]
+name = "inline_java"
+changelog_update = true
