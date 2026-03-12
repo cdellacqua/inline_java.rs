@@ -14,3 +14,5 @@ edition = "2024"
 license = "MIT"
 authors = ["Carlo Dell'Acqua <carlo.dellacqua97@gmail.com>"]
 repository = "https://github.com/cdellacqua/inline_java.rs"
+homepage = "https://github.com/cdellacqua/inline_java.rs"
+keywords = ["java", "jvm", "macro", "interop", "ffi"]

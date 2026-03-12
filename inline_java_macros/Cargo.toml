@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Proc-macro implementation for inline_java — not intended for direct use"
+keywords.workspace = true
+categories = ["development-tools::procedural-macro-helpers"]
 readme = "README.md"
 
 [lib]
