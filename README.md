@@ -20,7 +20,7 @@ inline_java = "0.1.0"
 Compiles and runs Java each time the surrounding Rust code executes.  Expands
 to `Result<T, inline_java::JavaError>`.
 
-```rust,no_run
+```rust
 use inline_java::java;
 
 // No type annotation needed — the macro infers `i32` from `static int run()`
@@ -37,7 +37,7 @@ Like `java!`, but `run(...)` may declare parameters.  Expands to a Rust
 function value `fn(P1, P2, …) -> Result<T, JavaError>`.  Parameters are
 serialised by Rust and piped to the Java process over stdin.
 
-```rust,no_run
+```rust
 use inline_java::java_fn;
 
 // Single parameter — return type inferred from `static int run()`
@@ -55,7 +55,6 @@ let msg: String = java_fn! {
 }("Hello", "World").unwrap();
 
 // Optional parameter
-use inline_java::java_fn;
 let result: Option<i32> = java_fn! {
     import java.util.Optional;
     static Optional<Integer> run(Optional<Integer> val) {
@@ -70,7 +69,7 @@ Runs Java during `rustc` macro expansion and splices the result as a Rust
 literal at the call site.  No parameters are allowed (values must be
 compile-time constants).
 
-```rust,no_run
+```rust
 use inline_java::ct_java;
 
 const PI: f64 = ct_java! {
@@ -133,7 +132,7 @@ commas:
 - `javac = "<args>"` — extra arguments for `javac` (shell-quoted).
 - `java  = "<args>"` — extra arguments for `java` (shell-quoted).
 
-```rust,no_run
+```rust,ignore
 use inline_java::java;
 
 let result: String = java! {
@@ -146,12 +145,31 @@ let result: String = java! {
 }.unwrap();
 ```
 
+## Cache directory
+
+Compiled `.class` files are cached so that unchanged Java code is not
+recompiled on every run.  The cache root is resolved in this order:
+
+| Priority | Location |
+|----------|----------|
+| 1 | `INLINE_JAVA_CACHE_DIR` environment variable (if set and non-empty) |
+| 2 | Platform cache directory — `~/.cache/inline_java` on Linux, `~/Library/Caches/inline_java` on macOS, `%LOCALAPPDATA%\inline_java` on Windows |
+| 3 | `<system temp>/inline_java` (fallback if the platform cache dir is unavailable) |
+
+Each compiled class gets its own subdirectory named
+`<ClassName>_<hash>/`, where the hash covers the Java source, the
+expanded `javac` flags, the current working directory, and the raw `java`
+flags.  This means changing any of those inputs automatically triggers a
+fresh compilation.
+
 ## Using project Java source files
 
 Use `import` or `package` directives together with `javac = "-sourcepath <path>"`
 (or `-classpath`) to call into your own Java code:
 
-```rust,no_run
+```rust
+use inline_java::java;
+
 // import style
 let s: String = java! {
     javac = "-sourcepath .",

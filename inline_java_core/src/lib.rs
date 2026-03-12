@@ -123,9 +123,30 @@ const CP_SEP: char = ':';
 #[cfg(windows)]
 const CP_SEP: char = ';';
 
-/// Compute the deterministic temp-dir path used to cache compiled `.class` files.
+/// Resolve the root directory used to cache compiled `.class` files.
 ///
-/// The path is `<system_temp>/<class_name>_<hex_hash>/` where `hex_hash` is a
+/// Resolution order:
+/// 1. `INLINE_JAVA_CACHE_DIR` environment variable, if set and non-empty.
+/// 2. The XDG / platform cache directory (`~/.cache/inline_java` on Linux,
+///    `~/Library/Caches/inline_java` on macOS, `%LOCALAPPDATA%\inline_java`
+///    on Windows) via the [`dirs`] crate.
+/// 3. `<system_temp>/inline_java` as a final fallback.
+#[must_use]
+pub fn base_cache_dir() -> std::path::PathBuf {
+	if let Ok(v) = std::env::var("INLINE_JAVA_CACHE_DIR")
+		&& !v.is_empty()
+	{
+		return std::path::PathBuf::from(v);
+	}
+	if let Some(cache) = dirs::cache_dir() {
+		return cache.join("inline_java");
+	}
+	std::env::temp_dir().join("inline_java")
+}
+
+/// Compute the deterministic cache-dir path used to store compiled `.class` files.
+///
+/// The path is `<base_cache_dir>/<class_name>_<hex_hash>/` where `hex_hash` is a
 /// 64-bit hash of:
 /// - `java_class` — the complete Java source text
 /// - `expand_java_args(javac_raw)` — shell-expanded javac args (env vars and
@@ -138,10 +159,7 @@ const CP_SEP: char = ';';
 /// - `java_raw` — hashed as a raw string (no expansion needed for cache
 ///   differentiation; the `java` step always re-runs fresh)
 ///
-/// This approach handles both env-var changes and relative paths without any
-/// token-parsing heuristics: shell-expanding `javac_raw` captures env-var
-/// differences, and mixing in the CWD correctly differentiates relative paths
-/// across working directories.
+/// The base directory is resolved by [`base_cache_dir`].
 #[must_use]
 #[allow(clippy::similar_names)]
 pub fn cache_dir(
@@ -160,7 +178,7 @@ pub fn cache_dir(
 	java_raw.hash(&mut h);
 
 	let hex = format!("{:016x}", h.finish());
-	std::env::temp_dir().join(format!("{class_name}_{hex}"))
+	base_cache_dir().join(format!("{class_name}_{hex}"))
 }
 
 /// Compile (if needed) and run a generated Java class, returning raw stdout bytes.
@@ -340,16 +358,17 @@ mod tests {
 	}
 
 	// -----------------------------------------------------------------------
-	// cache_dir result is inside the system temp directory and uses the
-	// class_name as a prefix.
+	// cache_dir result is inside base_cache_dir and uses the class_name as a
+	// prefix.
 	// -----------------------------------------------------------------------
 	#[test]
 	fn cache_dir_path_structure() {
 		let result = cache_dir("InlineJava_abc123", "src", "", "");
-		let tmp = std::env::temp_dir();
+		let base = super::base_cache_dir();
 		assert!(
-			result.starts_with(&tmp),
-			"cache_dir result must be under the system temp dir; got: {}",
+			result.starts_with(&base),
+			"cache_dir result must be under base_cache_dir ({}); got: {}",
+			base.display(),
 			result.display()
 		);
 		let file_name = result.file_name().unwrap().to_string_lossy();
@@ -357,5 +376,16 @@ mod tests {
 			file_name.starts_with("InlineJava_abc123_"),
 			"cache_dir result filename must start with the class name; got: {file_name}"
 		);
+	}
+
+	// -----------------------------------------------------------------------
+	// INLINE_JAVA_CACHE_DIR env var overrides the base cache directory.
+	// -----------------------------------------------------------------------
+	#[test]
+	fn base_cache_dir_respects_env_var() {
+		unsafe { std::env::set_var("INLINE_JAVA_CACHE_DIR", "/custom/cache") };
+		let base = super::base_cache_dir();
+		unsafe { std::env::remove_var("INLINE_JAVA_CACHE_DIR") };
+		assert_eq!(base, std::path::PathBuf::from("/custom/cache"));
 	}
 }
