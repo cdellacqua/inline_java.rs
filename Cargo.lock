@@ -79,6 +79,7 @@ dependencies = [
 name = "inline_java_core"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "fd-lock",
  "shellexpand",
  "thiserror",
