@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Runtime support crate for inline_java — not intended for direct use"
+keywords.workspace = true
+categories = ["development-tools::ffi", "api-bindings"]
 readme = "README.md"
 
 [dependencies]
