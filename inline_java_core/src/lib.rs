@@ -10,6 +10,7 @@
 //! - [`run_java`] — compile (if needed) and run a generated Java class.
 //! - [`expand_java_args`] — shell-expand an option string into individual args.
 //! - [`cache_dir`] — compute the deterministic temp-dir path for a Java class.
+//! - [`detect_java_version`] — probe `javac -version` and return the major version.
 
 use shellexpand::full_with_context_no_errors;
 
@@ -123,6 +124,39 @@ const CP_SEP: char = ':';
 #[cfg(windows)]
 const CP_SEP: char = ';';
 
+/// Detect the installed Java major version by running `javac -version`.
+///
+/// `javac` (not `java`) is used because the compiler determines what class-file
+/// format is produced; the runtime is not guaranteed to be present.  Output is
+/// read from stdout (most JDKs) with stderr as fallback.
+///
+/// # Errors
+///
+/// Returns [`JavaError::Io`] if `javac` cannot be spawned or its output cannot
+/// be parsed as a version string.
+pub fn detect_java_version() -> Result<String, JavaError> {
+	let output = std::process::Command::new("javac")
+		.arg("-version")
+		.output()
+		.map_err(|e| JavaError::Io(format!("failed to run `javac -version`: {e}")))?;
+	// `javac -version` writes to stdout on most JDKs, e.g. "javac 21.0.10\n"
+	// (some older JDKs write to stderr; check both, prefer stdout)
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	let raw = if !stdout.trim().is_empty() { &*stdout } else { &*stderr };
+	let version_str = raw.trim().strip_prefix("javac ").unwrap_or(raw.trim());
+	let major = version_str
+		.split('.')
+		.next()
+		.and_then(|s| s.parse::<u32>().ok())
+		.ok_or_else(|| {
+			JavaError::Io(format!(
+				"could not parse major version from `javac -version` output: {raw:?}"
+			))
+		})?;
+	Ok(major.to_string())
+}
+
 /// Resolve the root directory used to cache compiled `.class` files.
 ///
 /// Resolution order:
@@ -158,16 +192,23 @@ pub fn base_cache_dir() -> std::path::PathBuf {
 ///   directories hash to different cache entries
 /// - `java_raw` — hashed as a raw string (no expansion needed for cache
 ///   differentiation; the `java` step always re-runs fresh)
+/// - [`detect_java_version()`] — the installed `javac` major version; ensures
+///   that upgrading the JDK produces a fresh cache entry whose `.class` files
+///   are compiled by the new compiler
 ///
 /// The base directory is resolved by [`base_cache_dir`].
-#[must_use]
+///
+/// # Errors
+///
+/// Returns [`JavaError::Io`] if `javac -version` cannot be run or its output
+/// cannot be parsed (see [`detect_java_version`]).
 #[allow(clippy::similar_names)]
 pub fn cache_dir(
 	class_name: &str,
 	java_class: &str,
 	javac_raw: &str,
 	java_raw: &str,
-) -> std::path::PathBuf {
+) -> Result<std::path::PathBuf, JavaError> {
 	use std::collections::hash_map::DefaultHasher;
 	use std::hash::{Hash, Hasher};
 
@@ -176,9 +217,10 @@ pub fn cache_dir(
 	expand_java_args(javac_raw).hash(&mut h); // shell-expanded; CWD handles relative paths
 	std::env::current_dir().ok().hash(&mut h); // anchors relative paths in javac_raw
 	java_raw.hash(&mut h);
+	detect_java_version()?.hash(&mut h); // avoids .class collisions across JDK major versions
 
 	let hex = format!("{:016x}", h.finish());
-	base_cache_dir().join(format!("{class_name}_{hex}"))
+	Ok(base_cache_dir().join(format!("{class_name}_{hex}")))
 }
 
 /// Compile (if needed) and run a generated Java class, returning raw stdout bytes.
@@ -229,7 +271,7 @@ pub fn run_java(
 	use std::io::Write;
 	use std::process::Stdio;
 
-	let tmp_dir = cache_dir(class_name, java_class, javac_raw, java_raw);
+	let tmp_dir = cache_dir(class_name, java_class, javac_raw, java_raw)?;
 	let javac_extra = expand_java_args(javac_raw);
 	let mut java_extra = expand_java_args(java_raw);
 	inject_classpath(&mut java_extra, &tmp_dir.to_string_lossy());
@@ -315,8 +357,8 @@ mod tests {
 	// -----------------------------------------------------------------------
 	#[test]
 	fn cache_dir_idempotent() {
-		let a = cache_dir("MyClass", "class body", "-cp /usr/lib", "-verbose");
-		let b = cache_dir("MyClass", "class body", "-cp /usr/lib", "-verbose");
+		let a = cache_dir("MyClass", "class body", "-cp /usr/lib", "-verbose").unwrap();
+		let b = cache_dir("MyClass", "class body", "-cp /usr/lib", "-verbose").unwrap();
 		assert_eq!(
 			a, b,
 			"cache_dir must return the same path for identical args"
@@ -329,8 +371,8 @@ mod tests {
 	// -----------------------------------------------------------------------
 	#[test]
 	fn cache_dir_differs_for_different_javac_raw() {
-		let a = cache_dir("MyClass", "class body", "-cp /usr/lib/foo", "");
-		let b = cache_dir("MyClass", "class body", "-cp /usr/lib/bar", "");
+		let a = cache_dir("MyClass", "class body", "-cp /usr/lib/foo", "").unwrap();
+		let b = cache_dir("MyClass", "class body", "-cp /usr/lib/bar", "").unwrap();
 		assert_ne!(
 			a, b,
 			"cache_dir must differ when javac_raw expands to different args"
@@ -342,8 +384,8 @@ mod tests {
 	// -----------------------------------------------------------------------
 	#[test]
 	fn cache_dir_differs_for_different_java_class() {
-		let a = cache_dir("MyClass", "class body A", "", "");
-		let b = cache_dir("MyClass", "class body B", "", "");
+		let a = cache_dir("MyClass", "class body A", "", "").unwrap();
+		let b = cache_dir("MyClass", "class body B", "", "").unwrap();
 		assert_ne!(a, b, "cache_dir must differ when java_class differs");
 	}
 
@@ -352,8 +394,8 @@ mod tests {
 	// -----------------------------------------------------------------------
 	#[test]
 	fn cache_dir_differs_for_different_java_raw() {
-		let a = cache_dir("MyClass", "class body", "", "-Xmx256m");
-		let b = cache_dir("MyClass", "class body", "", "-Xmx512m");
+		let a = cache_dir("MyClass", "class body", "", "-Xmx256m").unwrap();
+		let b = cache_dir("MyClass", "class body", "", "-Xmx512m").unwrap();
 		assert_ne!(a, b, "cache_dir must differ when java_raw differs");
 	}
 
@@ -363,7 +405,7 @@ mod tests {
 	// -----------------------------------------------------------------------
 	#[test]
 	fn cache_dir_path_structure() {
-		let result = cache_dir("InlineJava_abc123", "src", "", "");
+		let result = cache_dir("InlineJava_abc123", "src", "", "").unwrap();
 		let base = super::base_cache_dir();
 		assert!(
 			result.starts_with(&base),
@@ -375,6 +417,19 @@ mod tests {
 		assert!(
 			file_name.starts_with("InlineJava_abc123_"),
 			"cache_dir result filename must start with the class name; got: {file_name}"
+		);
+	}
+
+	// -----------------------------------------------------------------------
+	// detect_java_version returns a non-empty numeric string when javac is
+	// available in PATH (as it is in this repo's dev environment).
+	// -----------------------------------------------------------------------
+	#[test]
+	fn detect_java_version_returns_major() {
+		let version = super::detect_java_version().expect("javac must be on PATH");
+		assert!(
+			version.parse::<u32>().is_ok(),
+			"version string must be a plain integer (major); got: {version:?}"
 		);
 	}
 
