@@ -199,7 +199,7 @@ migrations**.  The typical workflow is:
 3. Use `java_fn!` to call the original Java with the same inputs and assert
    that both implementations produce identical outputs.
 
-```rust,no_run
+```rust
 use inline_java::java_fn;
 
 fn my_rust_impl(n: i32) -> i32 {
