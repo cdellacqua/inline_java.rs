@@ -89,6 +89,24 @@ fn java_runtime_javac_classpath_jar_long_arg_name() {
 	assert_eq!(val, Ok("Hello, World!".to_string()));
 }
 
+// classpath JAR — relative path (resolved relative to cwd = CARGO_MANIFEST_DIR)
+
+#[test]
+fn java_runtime_classpath_relative_path() {
+	let manifest_dir = env!("CARGO_MANIFEST_DIR");
+	let jar_abs = format!("{manifest_dir}/../target/inline_java_flags_cp_rel_jar/demo.jar");
+	build_demo_jar(&jar_abs);
+	let val: Result<String, _> = java! {
+		javac = "-cp \"../target/inline_java_flags_cp_rel_jar/demo.jar\"",
+		java = "-cp ../target/inline_java_flags_cp_rel_jar/demo.jar",
+		import com.example.demo.*;
+		static String run() {
+			return new HelloWorld().greet();
+		}
+	};
+	assert_eq!(val, Ok("Hello, World!".to_string()));
+}
+
 // javac = "..." : sourcepath lets javac resolve project Java files
 
 #[test]
