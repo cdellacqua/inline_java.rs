@@ -207,7 +207,6 @@ fn my_rust_impl(n: i32) -> i32 {
     n * 2
 }
 
-#[test]
 fn parity_with_java() {
     let java_impl = java_fn! {
         static int run(int n) {
@@ -221,6 +220,8 @@ fn parity_with_java() {
         assert_eq!(my_rust_impl(n), expected, "diverged for n={n}");
     }
 }
+
+parity_with_java();
 ```
 
 ## Crate layout

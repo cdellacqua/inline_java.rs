@@ -143,7 +143,11 @@ pub fn detect_java_version() -> Result<String, JavaError> {
 	// (some older JDKs write to stderr; check both, prefer stdout)
 	let stdout = String::from_utf8_lossy(&output.stdout);
 	let stderr = String::from_utf8_lossy(&output.stderr);
-	let raw = if !stdout.trim().is_empty() { &*stdout } else { &*stderr };
+	let raw = if stdout.trim().is_empty() {
+		&*stderr
+	} else {
+		&*stdout
+	};
 	let version_str = raw.trim().strip_prefix("javac ").unwrap_or(raw.trim());
 	let major = version_str
 		.split('.')
