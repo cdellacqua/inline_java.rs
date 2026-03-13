@@ -141,6 +141,22 @@ fn java_fn_arg_optional_list_of_optional_string_2d_array_present() {
 	);
 }
 
+// Unicode strings: Rust → Java → Rust round-trip with transformation.
+// Java reverses the input string (by Unicode code points) and returns it.
+#[test]
+fn java_fn_unicode_string_round_trip() {
+	let input = "Hello, 世界! 🦀→☕";
+	let reversed: String = java_fn! {
+		static String run(String s) {
+			return new StringBuilder(s).reverse().toString();
+		}
+	}(input)
+	.unwrap();
+	// Rust-side expected: reverse code-point by code-point
+	let expected: String = input.chars().rev().collect();
+	assert_eq!(reversed, expected);
+}
+
 // Optional<List<Optional<String[][]>>> as input → Option<Vec<Option<Vec<Vec<String>>>>> (absent)
 #[test]
 fn java_fn_arg_optional_list_of_optional_string_2d_array_absent() {
