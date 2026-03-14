@@ -1,4 +1,4 @@
-#![doc = include_str!("../../README.md")]
+#![doc = include_str!("../README.md")]
 
 /// Re-export the proc macros so users only need to depend on this crate.
 pub use inline_java_macros::{ct_java, java, java_fn};

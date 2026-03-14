@@ -9,7 +9,7 @@ homepage.workspace = true
 description = "Embed Java directly in Rust — evaluated at program runtime or at compile time"
 keywords.workspace = true
 categories = ["development-tools::ffi", "api-bindings"]
-readme = "../README.md"
+readme = "README.md"
 
 [dependencies]
 inline_java_core = { version = "0.1.0", path = "../inline_java_core" }
