@@ -1095,16 +1095,17 @@ fn parse_java_type(tts: &[TokenTree]) -> Result<(JavaType, usize), String> {
 					}
 				}
 				_ => {
-					// Try primitive name first, then String
+					// Try primitive name first, then any boxed/reference type.
 					let mut consumed = offset + 1;
 					let base_ty = if let Some(p) = PrimitiveType::from_name(&name) {
 						JavaType::Primitive(p)
-					} else if name == "String" {
-						JavaType::Boxed(BoxedType::String)
+					} else if let Some(b) = BoxedType::from_name(&name) {
+						JavaType::Boxed(b)
 					} else {
 						return Err(format!(
 							"inline_java: `{name}` is not a supported Java type; \
-							 scalar types: byte short int long float double boolean char String"
+							 scalar types: byte short int long float double boolean char; \
+							 boxed types: Byte Short Integer Long Float Double Boolean Character String"
 						));
 					};
 

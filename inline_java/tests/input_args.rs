@@ -170,3 +170,16 @@ fn java_fn_arg_optional_list_of_optional_string_2d_array_absent() {
 	.unwrap();
 	assert_eq!(v, None);
 }
+
+
+#[test]
+#[allow(clippy::float_cmp)]
+fn java_fn_arg_boxed() {
+	let v: f64 = java_fn! {
+		static Double run(Double v) {
+			return v;
+		}
+	}(2.)
+	.unwrap();
+	assert_eq!(v, 2.);
+}
