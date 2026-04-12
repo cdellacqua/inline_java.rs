@@ -12,5 +12,5 @@ categories = ["development-tools::ffi", "api-bindings"]
 readme = "README.md"
 
 [dependencies]
-inline_java_core = { version = "0.1.0", path = "../inline_java_core" }
-inline_java_macros = { version = "0.1.0", path = "../inline_java_macros" }
+inline_java_core = { version = "0.1.1", path = "../inline_java_core" }
+inline_java_macros = { version = "0.1.1", path = "../inline_java_macros" }
