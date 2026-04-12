@@ -158,9 +158,21 @@ recompiled on every run.  The cache root is resolved in this order:
 
 Each compiled class gets its own subdirectory named
 `<ClassName>_<hash>/`, where the hash covers the Java source, the
-expanded `javac` flags, the current working directory, and the raw `java`
-flags.  This means changing any of those inputs automatically triggers a
-fresh compilation.
+expanded `javac` flags, the current working directory, the raw `java`
+flags, and the maximum modification time of any `.java`, `.class`, `.jar`,
+or `.zip` file found under directories (or individual files) referenced by
+`-sourcepath` / `-classpath` in the `javac` flags.  This means changing
+any of those inputs — including editing a project Java file on the
+sourcepath — automatically triggers a fresh compilation.
+
+To force recompilation regardless of the hash (e.g. after editing files
+outside the tracked paths), set `INLINE_JAVA_CACHE_INVALIDATE=true` (also
+accepts `1` or `yes`).  This removes the cache entry for the current class
+before compiling, so a clean build always runs:
+
+```sh
+INLINE_JAVA_CACHE_INVALIDATE=true cargo run
+```
 
 ## Using project Java source files
 

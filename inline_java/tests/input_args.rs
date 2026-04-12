@@ -171,7 +171,6 @@ fn java_fn_arg_optional_list_of_optional_string_2d_array_absent() {
 	assert_eq!(v, None);
 }
 
-
 #[test]
 #[allow(clippy::float_cmp)]
 fn java_fn_arg_boxed() {

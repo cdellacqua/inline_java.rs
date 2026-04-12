@@ -12,6 +12,8 @@
 //! - [`cache_dir`] — compute the deterministic temp-dir path for a Java class.
 //! - [`detect_java_version`] — probe `javac -version` and return the major version.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use shellexpand::full_with_context_no_errors;
 
 /// All errors that `java!` and `java_fn!` can return at runtime (and that
@@ -124,6 +126,99 @@ const CP_SEP: char = ':';
 #[cfg(windows)]
 const CP_SEP: char = ';';
 
+/// File extensions considered Java-related when scanning directories for mtime
+/// changes.  Individual files listed explicitly in classpath/sourcepath are
+/// always tracked regardless of extension.
+const JAVA_RELATED_EXTENSIONS: &[&str] = &["java", "class", "jar", "zip"];
+
+/// Parse a string value as a boolean flag: `"true"`, `"1"`, and `"yes"`
+/// (case-insensitive) are truthy; everything else is falsy.
+fn parse_bool_env(val: &str) -> bool {
+	matches!(val.to_lowercase().trim(), "true" | "1" | "yes")
+}
+
+/// Return `true` when the `INLINE_JAVA_CACHE_INVALIDATE` environment variable
+/// is set to a truthy value (`"true"`, `"1"`, or `"yes"`, case-insensitive).
+fn is_cache_invalidate_set() -> bool {
+	std::env::var("INLINE_JAVA_CACHE_INVALIDATE").is_ok_and(|v| parse_bool_env(&v))
+}
+
+/// Walk `dir` recursively and return the maximum modification time of any file
+/// whose extension is one of [`JAVA_RELATED_EXTENSIONS`].  Returns `None` if
+/// no matching files are found or if `dir` cannot be read.
+fn max_mtime_in_dir(dir: &std::path::Path) -> Option<SystemTime> {
+	walkdir::WalkDir::new(dir)
+		.into_iter()
+		.filter_map(Result::ok)
+		.filter(|e| e.file_type().is_file())
+		.filter(|e| {
+			e.path()
+				.extension()
+				.and_then(|ext| ext.to_str())
+				.is_some_and(|ext| JAVA_RELATED_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+		})
+		.filter_map(|e| e.metadata().ok()?.modified().ok())
+		.reduce(Ord::max)
+}
+
+/// Parse `javac_args` for `-sourcepath`, `--source-path`, `-cp`, `-classpath`,
+/// and `--class-path` flags.  For each path segment found:
+///
+/// - If the segment is a **file**, its modification time is tracked directly
+///   (regardless of extension — the user explicitly referenced it).
+/// - If the segment is a **directory**, it is walked recursively and the
+///   maximum mtime of any [`JAVA_RELATED_EXTENSIONS`] file is taken.
+///
+/// Returns the maximum mtime across all referenced paths as nanoseconds since
+/// the Unix epoch, or `None` if no applicable paths were found or mtimes could
+/// not be read.
+fn java_source_paths_max_mtime_nanos(javac_args: &[String]) -> Option<u128> {
+	const SPACE_FLAGS: &[&str] = &[
+		"-sourcepath",
+		"--source-path",
+		"-cp",
+		"-classpath",
+		"--class-path",
+	];
+	let mut max_mtime: Option<SystemTime> = None;
+
+	let mut visit = |path_str: &str| {
+		for segment in path_str.split(CP_SEP) {
+			if segment.is_empty() {
+				continue;
+			}
+			let path = std::path::Path::new(segment);
+			if path.is_dir() {
+				if let Some(mtime) = max_mtime_in_dir(path) {
+					max_mtime = Some(max_mtime.map_or(mtime, |m: SystemTime| m.max(mtime)));
+				}
+			} else if path.is_file()
+				&& let Ok(meta) = path.metadata()
+				&& let Ok(mtime) = meta.modified()
+			{
+				max_mtime = Some(max_mtime.map_or(mtime, |m: SystemTime| m.max(mtime)));
+			}
+		}
+	};
+
+	let mut i = 0;
+	while i < javac_args.len() {
+		let arg = javac_args[i].as_str();
+		if SPACE_FLAGS.contains(&arg) && i + 1 < javac_args.len() {
+			i += 1;
+			visit(&javac_args[i].clone());
+		} else if let Some(v) = arg
+			.strip_prefix("--source-path=")
+			.or_else(|| arg.strip_prefix("--class-path="))
+		{
+			visit(v);
+		}
+		i += 1;
+	}
+
+	max_mtime.and_then(|mtime| mtime.duration_since(UNIX_EPOCH).ok().map(|d| d.as_nanos()))
+}
+
 /// Detect the installed Java major version by running `javac -version`.
 ///
 /// `javac` (not `java`) is used because the compiler determines what class-file
@@ -148,7 +243,16 @@ pub fn detect_java_version() -> Result<String, JavaError> {
 	} else {
 		&*stdout
 	};
-	let version_str = raw.trim().strip_prefix("javac ").unwrap_or(raw.trim());
+	// Strip JVM diagnostic lines (warnings, perf notes) that may appear before
+	// the actual "javac <version>" line when other JVM processes hold locks.
+	let version_line = raw
+		.lines()
+		.find(|l| l.starts_with("javac "))
+		.unwrap_or(raw.trim());
+	let version_str = version_line
+		.trim()
+		.strip_prefix("javac ")
+		.unwrap_or(version_line.trim());
 	let major = version_str
 		.split('.')
 		.next()
@@ -199,6 +303,11 @@ pub fn base_cache_dir() -> std::path::PathBuf {
 /// - [`detect_java_version()`] — the installed `javac` major version; ensures
 ///   that upgrading the JDK produces a fresh cache entry whose `.class` files
 ///   are compiled by the new compiler
+/// - maximum mtime (nanoseconds since Unix epoch) of any Java-related file
+///   (`.java`, `.class`, `.jar`, `.zip`) found under directories referenced by
+///   `-sourcepath`, `--source-path`, `-cp`, `-classpath`, or `--class-path`
+///   flags in `javac_raw`; individual files on those paths are tracked
+///   regardless of extension; `None` is hashed when no such paths are present
 ///
 /// The base directory is resolved by [`base_cache_dir`].
 ///
@@ -216,12 +325,15 @@ pub fn cache_dir(
 	use std::collections::hash_map::DefaultHasher;
 	use std::hash::{Hash, Hasher};
 
+	let javac_args = expand_java_args(javac_raw);
+
 	let mut h = DefaultHasher::new();
 	java_class.hash(&mut h);
-	expand_java_args(javac_raw).hash(&mut h); // shell-expanded; CWD handles relative paths
+	javac_args.hash(&mut h); // shell-expanded; CWD handles relative paths
 	std::env::current_dir().ok().hash(&mut h); // anchors relative paths in javac_raw
 	java_raw.hash(&mut h);
 	detect_java_version()?.hash(&mut h); // avoids .class collisions across JDK major versions
+	java_source_paths_max_mtime_nanos(&javac_args).hash(&mut h); // tracks external file changes
 
 	let hex = format!("{:016x}", h.finish());
 	Ok(base_cache_dir().join(format!("{class_name}_{hex}")))
@@ -241,6 +353,13 @@ pub fn cache_dir(
 /// - `javac_raw`       — raw `javac = "..."` option string (shell-expanded).
 /// - `java_raw`        — raw `java  = "..."` option string (shell-expanded).
 /// - `stdin_bytes`     — bytes to pipe to the child process's stdin (may be empty).
+///
+/// # Cache invalidation
+///
+/// If the `INLINE_JAVA_CACHE_INVALIDATE` environment variable is set to a
+/// truthy value (`"true"`, `"1"`, or `"yes"`, case-insensitive), the cache
+/// directory for this class is removed before compilation, forcing a full
+/// recompile regardless of the `.done` sentinel.
 ///
 /// # Errors
 ///
@@ -276,6 +395,12 @@ pub fn run_java(
 	use std::process::Stdio;
 
 	let tmp_dir = cache_dir(class_name, java_class, javac_raw, java_raw)?;
+
+	// Force recompilation when INLINE_JAVA_CACHE_INVALIDATE is set.
+	if is_cache_invalidate_set() && tmp_dir.exists() {
+		std::fs::remove_dir_all(&tmp_dir).map_err(|e| JavaError::Io(e.to_string()))?;
+	}
+
 	let javac_extra = expand_java_args(javac_raw);
 	let mut java_extra = expand_java_args(java_raw);
 	inject_classpath(&mut java_extra, &tmp_dir.to_string_lossy());
@@ -353,6 +478,8 @@ pub fn run_java(
 
 #[cfg(test)]
 mod tests {
+	use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 	use super::cache_dir;
 
 	// -----------------------------------------------------------------------
@@ -446,5 +573,88 @@ mod tests {
 		let base = super::base_cache_dir();
 		unsafe { std::env::remove_var("INLINE_JAVA_CACHE_DIR") };
 		assert_eq!(base, std::path::PathBuf::from("/custom/cache"));
+	}
+
+	// -----------------------------------------------------------------------
+	// parse_bool_env recognises truthy values and rejects others.
+	// Tested via the pure helper to avoid parallel-test env var races.
+	// -----------------------------------------------------------------------
+	#[test]
+	fn cache_invalidate_truthy_values() {
+		for val in &["true", "True", "TRUE", "1", "yes", "YES"] {
+			assert!(super::parse_bool_env(val), "expected truthy for {val:?}");
+		}
+	}
+
+	#[test]
+	fn cache_invalidate_falsy_values() {
+		for val in &["false", "False", "0", "no", ""] {
+			assert!(!super::parse_bool_env(val), "expected falsy for {val:?}");
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// java_source_paths_max_mtime_nanos returns None for empty/irrelevant args.
+	// -----------------------------------------------------------------------
+	#[test]
+	fn mtime_nanos_empty_args() {
+		assert_eq!(super::java_source_paths_max_mtime_nanos(&[]), None);
+	}
+
+	#[test]
+	fn mtime_nanos_no_path_flags() {
+		let args = vec!["-verbose:class".to_owned(), "-Xmx512m".to_owned()];
+		assert_eq!(super::java_source_paths_max_mtime_nanos(&args), None);
+	}
+
+	#[test]
+	fn mtime_nanos_nonexistent_path_returns_none() {
+		let args = vec![
+			"-sourcepath".to_owned(),
+			"/this/path/does/not/exist/at/all".to_owned(),
+		];
+		assert_eq!(super::java_source_paths_max_mtime_nanos(&args), None);
+	}
+
+	// -----------------------------------------------------------------------
+	// cache_dir changes when a file referenced via -sourcepath is modified.
+	// -----------------------------------------------------------------------
+	#[test]
+	fn cache_dir_differs_after_file_modification() {
+		use std::io::Write;
+
+		let tmp = std::env::temp_dir().join(format!(
+			"inline_java_mtime_test_{}",
+			SystemTime::now()
+				.duration_since(UNIX_EPOCH)
+				.unwrap_or_default()
+				.as_nanos()
+		));
+		std::fs::create_dir_all(&tmp).expect("create temp dir");
+		let java_file = tmp.join("Foo.java");
+
+		// Write initial content and record cache dir.
+		std::fs::write(&java_file, b"class Foo {}").expect("write java file");
+		let javac_raw = format!("-sourcepath {}", tmp.display());
+		let before = cache_dir("MyClass", "class body", &javac_raw, "").unwrap();
+
+		// Touch the file (update mtime) — sleep briefly to guarantee a
+		// different mtime even on filesystems with 1s resolution.
+		std::thread::sleep(Duration::from_millis(1100));
+		let mut f = std::fs::OpenOptions::new()
+			.append(true)
+			.open(&java_file)
+			.expect("open for append");
+		f.write_all(b" ").expect("append byte");
+		drop(f);
+
+		let after = cache_dir("MyClass", "class body", &javac_raw, "").unwrap();
+
+		std::fs::remove_dir_all(&tmp).ok();
+
+		assert_ne!(
+			before, after,
+			"cache_dir must differ after a referenced Java file is modified"
+		);
 	}
 }
