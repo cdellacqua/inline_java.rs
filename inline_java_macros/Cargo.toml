@@ -15,7 +15,7 @@ readme = "README.md"
 proc-macro = true
 
 [dependencies]
-inline_java_core = { version = "0.1.0", path = "../inline_java_core" }
+inline_java_core = { version = "0.1.1", path = "../inline_java_core" }
 proc-macro2 = { version = "1.0.106", features = ["span-locations"] }
 quote = "1.0.44"
 litrs = { version = "1.0.0", features = ["proc-macro2"] }
